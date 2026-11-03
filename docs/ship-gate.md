@@ -1356,3 +1356,38 @@ from blocked65's playthrough (seed 2 at medium, 346 game frames, section 11); CO
 
 No gain on any of the three, so **E1M1 stays blocked65 on `heat_e1m1_adopt`** and no baseline moves. The other levels'
 lists replaced a list made for a different map (p10, E1M1's); E1M1's list was already its own.
+
+## 14. The final creator, end to end: all nine levels (2026-11-03)
+
+`scripts/build_episode.py --out-dir build/episode_final --name final` -- every step of all nine levels from scratch, one
+heavy job at a time through `scripts/heavy.py`, on source `e506c7d433b6c29c` (main at `1747e19f`, #173) with flipjump
+`b1365b5` (the pinned 1.6.0). Started 2026-11-03 04:27; done in ~17 h (the dry run estimated 18.8 h). **EPISODE: PASS**
+(`docs/ship-evidence/episode_final_report.md` / `.json`; every step's log is under `build/episode_final/logs/`).
+
+| map | rebuild against the record | size % of 2^27 | tours | B0 | speed set (playthrough) | msframe against its baseline |
+|---|---|---|---|---|---|---|
+| E1M1 | BYTE-IDENTICAL `3a2c9564adbfcb07` | 37.40 | 14,792,784 | 14,249,841 | 12,266,909 | 62.7 / 62.7 NOT SEPARATED |
+| E1M2 | BYTE-IDENTICAL `96b738ecc2039b3c` | 60.45 | 17,283,193 | 16,806,922 | 14,710,806 | 63.5 / 63.6 NOT SEPARATED |
+| E1M3 | BYTE-IDENTICAL `1feb6db9fb21acc0` | 44.82 | 13,427,447 | 14,476,506 | 11,746,196 | 76.9 / 76.2 NOT SEPARATED |
+| E1M4 | BYTE-IDENTICAL `ed6075e2eeea0ca3` | 48.13 | 11,291,909 | 19,342,561 | 13,898,994 | 90.2 / 89.5 NOT SEPARATED |
+| E1M5 | BYTE-IDENTICAL `1bd109d61d0780b5` | 33.94 | 10,933,961 | 15,745,927 | 11,639,313 | 61.2 / 61.0 NOT SEPARATED |
+| E1M6 | BYTE-IDENTICAL `a59dad606f8ab9b2` | 64.07 | 25,479,320 (recorded OVER) | 25,737,929 (recorded OVER) | 17,749,651 | 110.5 / 109.6 NOT SEPARATED |
+| E1M7 | BYTE-IDENTICAL `49b38d76c4fc7052` | 77.56 | 19,461,121 | 21,711,026 | 13,965,960 | 94.6 / 101.4 NOT SEPARATED |
+| E1M8 | BYTE-IDENTICAL `b8aa2750e95f0a07` | 20.86 | 10,715,756 | 9,313,030 | 9,256,781 | 32.4 / 32.2 NOT SEPARATED |
+| E1M9 | BYTE-IDENTICAL `1171afc3d845e1f4` | 41.30 | 7,138,830 | 12,564,575 | 13,424,871 | 36.3 / 36.3 NOT SEPARATED |
+
+Every gate on every level PASS (`emit_check`, `p2a`, `m2_std`, `m3`, `hurt`, `fight`, `die`, the trail, the
+playthrough start to exit, the feature tests); every number above equals its record in sections 1b and 12-13 (the
+binaries are the shipped ones byte for byte, and the gates are deterministic). The msframe column is this run's A/B,
+binary against its own saved baseline on the same box: none B SLOWER; its absolute ms are this box tonight, not the
+frozen baselines.
+
+**The one FAIL of the first pass, and its fix.** E1M6's B0 (25,737,929) and tours (25,479,320) are over CAP-22, as
+section 12 records them; the creator held every level's B0 and tours to 22M, so the first pass ended EPISODE: FAIL on
+exactly the recorded numbers. The owner made each level's playthrough speed set its binding number (2026-10-29: "the
+E1M6/E1M7/E1M8 shortfalls stop mattering"), and E1M6's is 17,749,651. The creator's E1M6 row now carries
+`over_cap_recorded` = its two recorded bindings: over 22M PASSES up to the recorded number and FAILS one op above it;
+no other level has the allowance (`test_e1m6_over_cap_passes_up_to_its_record_only`: E1M6's own evidence passes, +1
+op fails, the same logs judged as E1M7 fail). The re-run (`--out-dir build/episode_final`, the same source: only the
+two failed steps ran, 804 s + 936 s) reproduced both numbers to the op and ended EPISODE: PASS
+(`episode_final_E1M6_b0.log`, `episode_final_E1M6_gamespeed.log`).

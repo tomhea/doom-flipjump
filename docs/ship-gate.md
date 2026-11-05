@@ -1391,3 +1391,6 @@ no other level has the allowance (`test_e1m6_over_cap_passes_up_to_its_record_on
 op fails, the same logs judged as E1M7 fail). The re-run (`--out-dir build/episode_final`, the same source: only the
 two failed steps ran, 804 s + 936 s) reproduced both numbers to the op and ended EPISODE: PASS
 (`episode_final_E1M6_b0.log`, `episode_final_E1M6_gamespeed.log`).
+
+**The owner, 2026-11-05: "i allow E1M6 to be over the 22M cap on its combat set."** E1M6 ships with its B0 at
+25,737,929 and its tours at 25,479,320; the creator's allowance stays bounded by those two numbers (one op more fails).

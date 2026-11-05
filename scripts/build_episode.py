@@ -214,10 +214,11 @@ for _m in [m for m in EPISODE[2:] if m not in LEVEL_SPREAD]:   # E1M6, E1M7: pla
         baseline=_p.baseline, trail_record=True, recorded_census=_p.census)
 
 # E1M6: its B0 and tours are recorded OVER (docs/ship-gate.md 12); the owner 2026-10-29 (decision 7) made each level's
-# playthrough speed set its binding number, and "the E1M6/E1M7/E1M8 shortfalls stop mattering"
+# playthrough speed set its binding number, and "the E1M6/E1M7/E1M8 shortfalls stop mattering"; and 2026-11-05: "i allow
+# E1M6 to be over the 22M cap on its combat set"
 REGISTRY["E1M6"] = dataclasses.replace(
     REGISTRY["E1M6"], over_cap_recorded={"b0": 25_737_929, "gamespeed": 25_479_320},
-    over_cap_note="recorded OVER at v3 (docs/ship-gate.md 12); the owner 2026-10-29: the playthrough's speed set binds")
+    over_cap_note="recorded OVER at v3 (docs/ship-gate.md 12); allowed by the owner 2026-11-05")
 
 REGISTRY = {m: REGISTRY[m] for m in EPISODE}     # the episode's order, whatever order the rows were made in
 

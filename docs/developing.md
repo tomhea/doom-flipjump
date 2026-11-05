@@ -7,7 +7,7 @@ This page is for people who want to build the program or change the toolchain. T
 
 ```bash
 git clone https://github.com/tomhea/doom-flipjump && cd doom-flipjump
-pip install -e ".[dev]"            # flipjump[io], pillow, pytest; Python 3.10 to 3.13
+pip install -e ".[dev]"            # flipjump[io], pillow, pytest; Python 3.11 or newer
 bash scripts/fetch_freedoom.sh     # the Freedoom WADs into assets/ (gitignored, ~28 MB each)
 ```
 

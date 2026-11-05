@@ -11,7 +11,7 @@
   <a href="https://github.com/tomhea/doom-flipjump/actions/workflows/ci.yml"><img src="https://github.com/tomhea/doom-flipjump/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/tomhea/doom-flipjump" alt="License: BSD-2-Clause"></a>
   <a href="https://pypi.org/project/flipjump/"><img src="https://img.shields.io/pypi/v/flipjump?label=flipjump" alt="flipjump on PyPI"></a>
-  <img src="https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue" alt="Python 3.10 to 3.13">
+  <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11 or newer">
   <a href="https://esolangs.org/wiki/FlipJump"><img src="https://img.shields.io/badge/FlipJump-one%20instruction-black" alt="FlipJump: one instruction"></a>
   <a href="https://github.com/tomhea/doom-flipjump/stargazers"><img src="https://img.shields.io/github/stars/tomhea/doom-flipjump?style=social" alt="GitHub stars"></a>
 </p>
@@ -23,7 +23,7 @@ No registers, no arithmetic, no conditional branch, no load or store. Everything
 This repository builds a 52-million-word FlipJump program that renders Freedoom's first level with
 textured walls, floors and ceilings, doors and lifts, monsters that hunt and fight back, six
 weapons on five keys up to a rocket launcher, damage, death, a menu and an automap, at 160x100, around 15 frames a second on the native FlipJump
-interpreter.
+interpreter. All nine levels of the first episode are built the same way, one program per level.
 
 <p align="center">
   <img src="docs/media/courtyard_fight.png" width="32%" alt="Shooting an imp in the courtyard">
@@ -34,6 +34,20 @@ interpreter.
 scenario. The shipped binary draws byte-identical frames on every frame of those runs (the B0 gate on the frozen v10 set, 2026-10-18,
 <a href="docs/ship-gate.md">ship-gate.md</a>).</sub></p>
 
+<details>
+<summary><b>All nine levels, E1M1 to E1M9</b> (a GIF from each)</summary>
+<br>
+
+| | | |
+|:-:|:-:|:-:|
+| <img src="docs/media/levels/e1m1.gif" width="100%" alt="E1M1"><br>E1M1 | <img src="docs/media/levels/e1m2.gif" width="100%" alt="E1M2"><br>E1M2 | <img src="docs/media/levels/e1m3.gif" width="100%" alt="E1M3"><br>E1M3 |
+| <img src="docs/media/levels/e1m4.gif" width="100%" alt="E1M4"><br>E1M4 | <img src="docs/media/levels/e1m5.gif" width="100%" alt="E1M5"><br>E1M5 | <img src="docs/media/levels/e1m6.gif" width="100%" alt="E1M6"><br>E1M6 |
+| <img src="docs/media/levels/e1m7.gif" width="100%" alt="E1M7"><br>E1M7 | <img src="docs/media/levels/e1m8.gif" width="100%" alt="E1M8"><br>E1M8 | <img src="docs/media/levels/e1m9.gif" width="100%" alt="E1M9"><br>E1M9 |
+
+<sub>Each GIF is the busiest stretch of a bot playing that level from start to exit. The level's binary drew the same
+frames, byte for byte, on every frame of that play (<a href="docs/ship-gate.md">ship-gate.md</a>, section 14).</sub>
+</details>
+
 ## Try it
 
 ```bash
@@ -43,16 +57,16 @@ fj --run doom.fjm
 ```
 
 Three lines: the FlipJump interpreter, the game (one file), and a window with the menu. Press
-**Enter** on NEW GAME. The file carries its own run settings (the screen device and the flat memory
+**Enter** on NEW GAME. That is E1M1; the release also has `doom_e1m2.fjm` to `doom_e1m9.fjm`, one file
+per level, run the same way. The file carries its own run settings (the screen device and the flat memory
 flag are in its header), so there is nothing else to type.
 
 Also possible, with nothing to install: `uvx fjdoom`.
 
-Until the 1.0 release is out, none of the three lines works yet: flipjump 1.6.0 is not on PyPI, the
-file does not exist and the `fjdoom` package is not published. [docs/developing.md](docs/developing.md)
-says how to build it today.
+The `fjdoom` package is not published yet, so that line does not work yet.
+[docs/developing.md](docs/developing.md) says how to build the game yourself.
 
-- Needs Python 3.10 to 3.13, a display, and about 1 GB of free RAM. Prebuilt interpreter wheels
+- Needs Python 3.11 or newer, a display, and about 1 GB of free RAM. Prebuilt interpreter wheels
   exist for Windows, macOS (Intel and Apple silicon) and Linux (x86-64 and ARM).
   <!-- TODO: measure cold start time and the download size; state both here. -->
 - Windows PowerShell 5 aliases `curl` to its own command: type `curl.exe` there, or save the file
@@ -131,21 +145,21 @@ number below rests on anyone's word; each row names the command that produced it
 </p>
 <p align="center"><sub>Left: a mean frame of the benchmark tours. Drawing walls is 60% of it and sprites 24%; all the game logic, the
 status bar and the menus together are 1.6%. Right: the program. Lookup tables are 41% of it, which is the whole
-trick: arithmetic is read, not computed. Measured on blocked62; the shipped blocked63 adds the map page, +0.3%.</sub></p>
+trick: arithmetic is read, not computed. Measured on blocked62; the shipped blocked65 is the same game on flipjump 1.6.0's library, 12.6% fewer flip-jumps a frame, not re-profiled.</sub></p>
 
 | | |
 |---|---|
 | instructions in the language | 1 |
-| the program | 52.3 million words, 39.8 MB; 39% of the 2^32-bit address space |
-| one frame | about 16 million flip-jumps; up to 28 million in the heaviest fight |
-| speed | 68 ms a frame, about 15 fps, on one core, at 233 million flip-jumps per second |
+| the program | 50.2 million words, a 17.6 MB file; 37% of the 2^32-bit address space |
+| one frame | about 14 million flip-jumps; up to 24 million in the heaviest fight |
+| speed | 63 ms a frame, about 16 fps, on one core, at 223 million flip-jumps per second |
 | a 32-bit addition | about 800 flip-jumps, so a pixel costs about one addition |
 | the screen | 160 x 100, 256 colours, a 16-row status bar |
 | the check | every frame of eleven scripted fights identical, pixel for pixel, to the Python model |
 | the build | one pass, about 45 minutes, about 10 GB of RAM |
 
-Every number comes from the record of the shipped build, `doom_e1m1_blocked63.fjm`
-(SHA-256 `b65e5a97...994120c`), where each stands next to the command that produced it:
+Every number comes from the record of the shipped build, `doom_e1m1_blocked65.fjm`, the release's `doom.fjm`
+(SHA-256 `3a2c9564...af3815d3b`), where each stands next to the command that produced it:
 [docs/ship-gate.md](docs/ship-gate.md). For scale: DOOM on a 486DX2-66 spent about thirty
 instructions per pixel. [The story](docs/story.md) has the arithmetic.
 
@@ -158,7 +172,7 @@ header) that shows whatever the program writes to it. The same `.fjm` runs, slow
 **Is this the real DOOM?** It is a DOOM engine: the BSP renderer, the WAD format and the game rules
 re-implemented from the published sources. The level and the art are
 [Freedoom](https://freedoom.github.io/)'s (BSD-licensed), because id Software's assets cannot be
-redistributed. What you play is Freedoom Phase 1's E1M1, not id's. The compiler takes any
+redistributed. What you play is Freedoom Phase 1's first episode, E1M1 to E1M9, not id's. The compiler takes any
 DOOM-format WAD as input. <!-- TODO: either test a build from doom1.wad before launch and describe it here, or delete this sentence. -->
 
 **How was it built?** <!-- TODO owner: this is the paragraph HN reads first; edit it in your own words. -->

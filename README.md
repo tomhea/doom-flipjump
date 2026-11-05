@@ -63,9 +63,8 @@ flag are in its header), so there is nothing else to type.
 
 Also possible, with nothing to install: `uvx fjdoom`.
 
-Until the 1.0 release is out, none of the three lines works yet: flipjump 1.6.0 is not on PyPI, the
-file does not exist and the `fjdoom` package is not published. [docs/developing.md](docs/developing.md)
-says how to build it today.
+The `fjdoom` package is not published yet, so that line does not work yet.
+[docs/developing.md](docs/developing.md) says how to build the game yourself.
 
 - Needs Python 3.10 to 3.13, a display, and about 1 GB of free RAM. Prebuilt interpreter wheels
   exist for Windows, macOS (Intel and Apple silicon) and Linux (x86-64 and ARM).

@@ -11,7 +11,7 @@
   <a href="https://github.com/tomhea/doom-flipjump/actions/workflows/ci.yml"><img src="https://github.com/tomhea/doom-flipjump/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/tomhea/doom-flipjump" alt="License: BSD-2-Clause"></a>
   <a href="https://pypi.org/project/flipjump/"><img src="https://img.shields.io/pypi/v/flipjump?label=flipjump" alt="flipjump on PyPI"></a>
-  <img src="https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue" alt="Python 3.10 to 3.13">
+  <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11 or newer">
   <a href="https://esolangs.org/wiki/FlipJump"><img src="https://img.shields.io/badge/FlipJump-one%20instruction-black" alt="FlipJump: one instruction"></a>
   <a href="https://github.com/tomhea/doom-flipjump/stargazers"><img src="https://img.shields.io/github/stars/tomhea/doom-flipjump?style=social" alt="GitHub stars"></a>
 </p>
@@ -66,7 +66,7 @@ Also possible, with nothing to install: `uvx fjdoom`.
 The `fjdoom` package is not published yet, so that line does not work yet.
 [docs/developing.md](docs/developing.md) says how to build the game yourself.
 
-- Needs Python 3.10 to 3.13, a display, and about 1 GB of free RAM. Prebuilt interpreter wheels
+- Needs Python 3.11 or newer, a display, and about 1 GB of free RAM. Prebuilt interpreter wheels
   exist for Windows, macOS (Intel and Apple silicon) and Linux (x86-64 and ARM).
   <!-- TODO: measure cold start time and the download size; state both here. -->
 - Windows PowerShell 5 aliases `curl` to its own command: type `curl.exe` there, or save the file
@@ -145,21 +145,21 @@ number below rests on anyone's word; each row names the command that produced it
 </p>
 <p align="center"><sub>Left: a mean frame of the benchmark tours. Drawing walls is 60% of it and sprites 24%; all the game logic, the
 status bar and the menus together are 1.6%. Right: the program. Lookup tables are 41% of it, which is the whole
-trick: arithmetic is read, not computed. Measured on blocked62; the shipped blocked63 adds the map page, +0.3%.</sub></p>
+trick: arithmetic is read, not computed. Measured on blocked62; the shipped blocked65 is the same game on flipjump 1.6.0's library, 12.6% fewer flip-jumps a frame, not re-profiled.</sub></p>
 
 | | |
 |---|---|
 | instructions in the language | 1 |
-| the program | 52.3 million words, 39.8 MB; 39% of the 2^32-bit address space |
-| one frame | about 16 million flip-jumps; up to 28 million in the heaviest fight |
-| speed | 68 ms a frame, about 15 fps, on one core, at 233 million flip-jumps per second |
+| the program | 50.2 million words, a 17.6 MB file; 37% of the 2^32-bit address space |
+| one frame | about 14 million flip-jumps; up to 24 million in the heaviest fight |
+| speed | 63 ms a frame, about 16 fps, on one core, at 223 million flip-jumps per second |
 | a 32-bit addition | about 800 flip-jumps, so a pixel costs about one addition |
 | the screen | 160 x 100, 256 colours, a 16-row status bar |
 | the check | every frame of eleven scripted fights identical, pixel for pixel, to the Python model |
 | the build | one pass, about 45 minutes, about 10 GB of RAM |
 
-Every number comes from the record of the shipped build, `doom_e1m1_blocked63.fjm`
-(SHA-256 `b65e5a97...994120c`), where each stands next to the command that produced it:
+Every number comes from the record of the shipped build, `doom_e1m1_blocked65.fjm`, the release's `doom.fjm`
+(SHA-256 `3a2c9564...af3815d3b`), where each stands next to the command that produced it:
 [docs/ship-gate.md](docs/ship-gate.md). For scale: DOOM on a 486DX2-66 spent about thirty
 instructions per pixel. [The story](docs/story.md) has the arithmetic.
 

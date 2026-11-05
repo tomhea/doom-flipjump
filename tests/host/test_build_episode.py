@@ -181,6 +181,23 @@ def test_negative_control_caps():
     assert _judge("feature_tests", "E1M1", 1, "1 failed, 17 passed")[0] == "FAIL"
 
 
+
+def test_e1m6_over_cap_passes_up_to_its_record_only():
+    """E1M6's B0 and tours ship recorded OVER CAP-22 (the owner 2026-10-29): its own evidence passes, one op more fails,
+    and no other level inherits the allowance."""
+    b0 = (EVIDENCE / "e1m6_v3_b0.log").read_text(encoding="utf-8", errors="replace")
+    gs = (EVIDENCE / "e1m6_v3_gamespeed.log").read_text(encoding="utf-8", errors="replace")
+    assert _judge("b0", "E1M6", 0, b0)[0] == "PASS"
+    assert _judge("gamespeed", "E1M6", 2, gs)[0] == "PASS"
+    assert "over CAP-22" in _judge("gamespeed", "E1M6", 2, gs)[2]
+    b0_up = b0.replace("25,737,929 ops/frame", "25,737,930 ops/frame")
+    gs_up = gs.replace("25,479,320 ops/frame", "25,479,321 ops/frame")
+    assert _judge("b0", "E1M6", 0, b0_up)[0] == "FAIL"
+    assert _judge("gamespeed", "E1M6", 2, gs_up)[0] == "FAIL"
+    assert _judge("b0", "E1M7", 0, b0)[0] == "FAIL"
+    assert _judge("gamespeed", "E1M7", 2, gs)[0] == "FAIL"
+
+
 # ── resume ───────────────────────────────────────────────────────────────────────────────────────────────────────
 PASS_TEXT = {"emit_check": "asserts ON\nEMITTED in 1 s\n", "build": "done in 1s\n", "p2a": "P2A GATE PASS\n",
              "m2_std": "M2 STANDALONE GATE: PASS\n", "m3": "M3 GATE: PASS\n", "hurt": "HURT GATE PASS\n",

@@ -120,6 +120,10 @@ class MapSpec:
     baseline: str = ""                  # msframe's saved baseline (mapprofile: shipped / shipped_<map>)
     size_cap_pct: float | None = 43.0   # gamespeed's size target; None = waived by the owner (size_note says so)
     size_note: str = ""
+    # B0 / the tours over CAP-22 that the owner let ship (step -> its recorded binding): over 22M is a PASS up to the
+    # recorded number and a FAIL above it; over_cap_note says why. The playthrough's speed set stays held to CAP-22.
+    over_cap_recorded: dict = field(default_factory=dict)
+    over_cap_note: str = ""
     trail_record: bool = False          # gamespeed_trail --record (writes scenarios/<map>/gamespeed.json)
     feature_tests: tuple = ()
     playthrough_skill: str | None = None
@@ -208,6 +212,12 @@ for _m in [m for m in EPISODE[2:] if m not in LEVEL_SPREAD]:   # E1M6, E1M7: pla
                   "(spread, census, labels, sha256, combat set, feature tests) and set ready=True",
         wad=_p.wad, spread=None, combat_set="scratchpad/gp/scenarios/combat_scenarios_%s_v1.json" % _m.lower(),
         baseline=_p.baseline, trail_record=True, recorded_census=_p.census)
+
+# E1M6: its B0 and tours are recorded OVER (docs/ship-gate.md 12); the owner 2026-10-29 (decision 7) made each level's
+# playthrough speed set its binding number, and "the E1M6/E1M7/E1M8 shortfalls stop mattering"
+REGISTRY["E1M6"] = dataclasses.replace(
+    REGISTRY["E1M6"], over_cap_recorded={"b0": 25_737_929, "gamespeed": 25_479_320},
+    over_cap_note="recorded OVER at v3 (docs/ship-gate.md 12); the owner 2026-10-29: the playthrough's speed set binds")
 
 REGISTRY = {m: REGISTRY[m] for m in EPISODE}     # the episode's order, whatever order the rows were made in
 
@@ -339,6 +349,8 @@ def judge(step: Step, spec: MapSpec, rc: int, text: str) -> tuple[str, dict, str
         if not b:
             return "FAIL", met, "no B0 BINDING line"
         if met["b0_binding"] > CAP_22:
+            if met["b0_binding"] <= spec.over_cap_recorded.get("b0", 0):
+                return "PASS", met, "over CAP-22, <= %s %s" % (spec.over_cap_recorded["b0"], spec.over_cap_note)
             return "FAIL", met, "CAP-22: binding %s > %s" % (met["b0_binding"], CAP_22)
         return "PASS", met, ""
     if n == "gamespeed":
@@ -350,11 +362,15 @@ def judge(step: Step, spec: MapSpec, rc: int, text: str) -> tuple[str, dict, str
             met["size_words"], met["size_pct"] = _num(sz.group(1)), float(sz.group(2))
         if rc not in (0, 2) or not sp or not sz:      # 2 = a target OVER: judged below against THIS map's caps
             return "FAIL", met, "rc %d or no SPEED / SIZE line" % rc
+        over = ""
         if sp.group(2) != "PASS" or met["binding"] > CAP_22:
-            return "FAIL", met, "speed binding %s OVER" % met["binding"]
+            if met["binding"] > spec.over_cap_recorded.get("gamespeed", 0):
+                return "FAIL", met, "speed binding %s OVER" % met["binding"]
+            over = "over CAP-22, <= %s %s" % (spec.over_cap_recorded["gamespeed"], spec.over_cap_note)
         if spec.size_cap_pct is not None and met["size_pct"] > spec.size_cap_pct:
             return "FAIL", met, "size %.2f%% > %.0f%%" % (met["size_pct"], spec.size_cap_pct)
-        return "PASS", met, ("" if spec.size_cap_pct is not None else "size cap waived: " + spec.size_note)
+        return "PASS", met, "; ".join(w for w in (over, "" if spec.size_cap_pct is not None
+                                                   else "size cap waived: " + spec.size_note) if w)
     if n == "msframe":
         for arm, v in re.findall(r"^\s*(base|change|A)\s+median\s+([\d.]+) ms/frame", text, re.M):
             met[{"base": "base_ms", "change": "ms_frame", "A": "ms_frame"}[arm]] = float(v)

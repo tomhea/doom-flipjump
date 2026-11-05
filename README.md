@@ -23,7 +23,7 @@ No registers, no arithmetic, no conditional branch, no load or store. Everything
 This repository builds a 52-million-word FlipJump program that renders Freedoom's first level with
 textured walls, floors and ceilings, doors and lifts, monsters that hunt and fight back, six
 weapons on five keys up to a rocket launcher, damage, death, a menu and an automap, at 160x100, around 15 frames a second on the native FlipJump
-interpreter.
+interpreter. All nine levels of the first episode are built the same way, one program per level.
 
 <p align="center">
   <img src="docs/media/courtyard_fight.png" width="32%" alt="Shooting an imp in the courtyard">
@@ -34,6 +34,20 @@ interpreter.
 scenario. The shipped binary draws byte-identical frames on every frame of those runs (the B0 gate on the frozen v10 set, 2026-10-18,
 <a href="docs/ship-gate.md">ship-gate.md</a>).</sub></p>
 
+<details>
+<summary><b>All nine levels, E1M1 to E1M9</b> (a GIF from each)</summary>
+<br>
+
+| | | |
+|:-:|:-:|:-:|
+| <img src="docs/media/levels/e1m1.gif" width="100%" alt="E1M1"><br>E1M1 | <img src="docs/media/levels/e1m2.gif" width="100%" alt="E1M2"><br>E1M2 | <img src="docs/media/levels/e1m3.gif" width="100%" alt="E1M3"><br>E1M3 |
+| <img src="docs/media/levels/e1m4.gif" width="100%" alt="E1M4"><br>E1M4 | <img src="docs/media/levels/e1m5.gif" width="100%" alt="E1M5"><br>E1M5 | <img src="docs/media/levels/e1m6.gif" width="100%" alt="E1M6"><br>E1M6 |
+| <img src="docs/media/levels/e1m7.gif" width="100%" alt="E1M7"><br>E1M7 | <img src="docs/media/levels/e1m8.gif" width="100%" alt="E1M8"><br>E1M8 | <img src="docs/media/levels/e1m9.gif" width="100%" alt="E1M9"><br>E1M9 |
+
+<sub>Each GIF is the busiest stretch of a bot playing that level from start to exit. The level's binary drew the same
+frames, byte for byte, on every frame of that play (<a href="docs/ship-gate.md">ship-gate.md</a>, section 14).</sub>
+</details>
+
 ## Try it
 
 ```bash
@@ -43,7 +57,8 @@ fj --run doom.fjm
 ```
 
 Three lines: the FlipJump interpreter, the game (one file), and a window with the menu. Press
-**Enter** on NEW GAME. The file carries its own run settings (the screen device and the flat memory
+**Enter** on NEW GAME. That is E1M1; the release also has `doom_e1m2.fjm` to `doom_e1m9.fjm`, one file
+per level, run the same way. The file carries its own run settings (the screen device and the flat memory
 flag are in its header), so there is nothing else to type.
 
 Also possible, with nothing to install: `uvx fjdoom`.
@@ -158,7 +173,7 @@ header) that shows whatever the program writes to it. The same `.fjm` runs, slow
 **Is this the real DOOM?** It is a DOOM engine: the BSP renderer, the WAD format and the game rules
 re-implemented from the published sources. The level and the art are
 [Freedoom](https://freedoom.github.io/)'s (BSD-licensed), because id Software's assets cannot be
-redistributed. What you play is Freedoom Phase 1's E1M1, not id's. The compiler takes any
+redistributed. What you play is Freedoom Phase 1's first episode, E1M1 to E1M9, not id's. The compiler takes any
 DOOM-format WAD as input. <!-- TODO: either test a build from doom1.wad before launch and describe it here, or delete this sentence. -->
 
 **How was it built?** <!-- TODO owner: this is the paragraph HN reads first; edit it in your own words. -->

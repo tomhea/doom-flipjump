@@ -1,0 +1,4 @@
+flipjump 1.5.1 C:\Users\tomhe\Documents\fjpin-path\flipjump\__init__.py
+tables as assembled  control PASS (9be0246700000000); 200 additions x 3 seeds: 546.5 / 546.5 / 548.4 flip-jumps per 32-bit addition
+--pool-tables        control PASS (9be0246700000000); 200 additions x 3 seeds: 339.6 / 339.7 / 341.5 flip-jumps per 32-bit addition
+(flipjump-doompin at b1365b5, the pinned 1.6.0; its __version__ string still reads 1.5.1; run 2026-11-10)

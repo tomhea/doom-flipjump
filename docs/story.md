@@ -233,11 +233,13 @@ thirty instructions for every one of the 64,000 pixels at 320x200. And each of t
 is a real instruction: one of them adds two 32-bit numbers.
 
 fjdoom spends about 800 flip-jumps per pixel in a fight (12.5 million a frame over 16,000 pixels).
-Adding two 32-bit numbers costs about 800 of them.
+Adding two 32-bit numbers costs about 340 of them, with the tables placed the way the game places
+them (about 550 anywhere else). The 800 earlier in this story was my estimate at the start; this is
+measured on today's library. <!-- docs/ship-evidence/add_cost_160.log, scratchpad/12m/add_cost.py -->
 
 Read that again. Every textured, shaded, perspective-correct pixel on the screen is drawn for about
-the price of one addition. The whole frame, monsters, fireballs and all, costs about as much
-flipping as sixteen thousand additions. id Software had two million instructions to spend on the
+the price of two additions. The whole frame, monsters, fireballs and all, costs about as much
+flipping as thirty-seven thousand additions. id Software had two million instructions to spend on the
 same job.
 
 How is that even possible? Because almost nothing is computed; it is looked up. The level's BSP
@@ -248,7 +250,7 @@ a pixel; it jumps there.
 (The 486 figures are enthusiasts' timedemo measurements, and Dhrystone MIPS flatters a chip that
 spends much of a DOOM frame waiting on memory. Both errors make the 486 look busier than it was,
 so the real gap is smaller than the arithmetic says. The point survives: thirty instructions per
-pixel against one addition's worth of flips.)
+pixel against two additions' worth of flips.)
 
 That is the power of getting to know the bits and bytes of an architecture, and understanding how
 to use it best.

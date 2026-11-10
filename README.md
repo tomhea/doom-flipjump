@@ -153,7 +153,7 @@ trick: arithmetic is read, not computed. Measured on blocked62; the shipped bloc
 | the program | 50.2 million words, a 17.6 MB file; 37% of the 2^32-bit address space |
 | one frame | about 14 million flip-jumps; up to 24 million in the heaviest fight |
 | speed | 63 ms a frame, about 16 fps, on one core, at 223 million flip-jumps per second |
-| a 32-bit addition | about 800 flip-jumps, so a pixel costs about one addition |
+| a 32-bit addition | about 340 flip-jumps, its tables placed the way the game places them; so a pixel costs about two and a half additions |
 | the screen | 160 x 100, 256 colours, a 16-row status bar |
 | the check | every frame of eleven scripted fights identical, pixel for pixel, to the Python model |
 | the build | one pass, about 45 minutes, about 10 GB of RAM |

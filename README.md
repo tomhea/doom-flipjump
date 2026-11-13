@@ -95,9 +95,9 @@ The `fjdoom` package is not published yet, so that line does not work yet.
 
 ## What you are looking at
 
-**The whole game is one FlipJump program.** The `.fjm` file is a memory image: 52 million 32-bit
+**The whole game is one FlipJump program.** The `.fjm` file is a memory image: 50 million 32-bit
 words, each a flip address or a jump address. At runtime the interpreter does nothing but this,
-about 16 million times per frame:
+about 14 million times per frame:
 
 ```c
 /* flipjump/interpreter/_fjcore.c, the fetch-flip-jump loop, paraphrased for w = 32 (addresses are bit addresses) */
@@ -183,8 +183,8 @@ oracle, byte-exact gates with instruction counts to the digit, a written review 
 change ([docs/cr-rules.md](docs/cr-rules.md)), and a rule that any measurement quoted as proof ships
 with a negative control. The whole record, including every per-milestone handoff, is in `docs/`.
 
-**Why 160x100 and 15 fps?** Cost is counted in flip-jumps and a frame is 14 to 16 million of them,
-at 233 million per second on one core. DOOM's native width is 320; 160 halves the per-frame work and
+**Why 160x100 and 16 fps?** Cost is counted in flip-jumps and a frame is 12 to 15 million of them,
+at 223 million per second on one core. DOOM's native width is 320; 160 halves the per-frame work and
 is what fits a 32-bit address space (2^32 bits of memory, 2^27 words of 32 bits) with room for the game. What was tried, kept and closed
 on the way is in [docs/ship-gate.md](docs/ship-gate.md).
 

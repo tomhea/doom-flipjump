@@ -1,8 +1,8 @@
 """The block pool of a blocked build, as the assembler laid it out, and its source words.
 
-GROUPS. flipjump-151's BlockPool (flipjump/assembler/preprocessor.py) groups tables by the
+GROUPS. flipjump's BlockPool (flipjump/assembler/inner_classes/table_pool.py) groups tables by the
 EXPRESSION of the word they dispatch through (`str(src + w)`, e.g. "(hex.tables.res + 32)"); the
-word is the source cell's JUMP word. `reconstruct()` re-runs BlockPool._preallocate from the frozen
+word is the source cell's JUMP word. `reconstruct()` re-runs the pool's layout (`pool_report.lay_out`) from the frozen
 counts cache and the build's knobs -- deterministic, which is what lets a build's two assemblies
 agree -- so every group's block base and size are known without re-assembling. `eval_key()`
 resolves a group expression against a label table (bit addresses). A PINNED word rests at
@@ -11,11 +11,18 @@ resolves a group expression against a label table (bit addresses). A PINNED word
 import gzip
 import json
 import re
+import sys
+from pathlib import Path
 
 from flipjump.assembler.inner_classes.table_pool import BlockPool, HotSite
 
+SRC = str(Path(__file__).resolve().parents[3] / "src")
+if SRC not in sys.path:
+    sys.path.insert(0, SRC)
+from doomfj import pool_report  # noqa: E402
+
 W = 32
-# ship-gate 1b's knobs (docs/ship-gate.md): the ones that enter _block_bits / _preallocate
+# ship-gate 1b's knobs (docs/ship-gate.md): the ones that enter the layout
 KNOBS = {"pool_base": 0x80000000, "span_bits": 0x7fffffe0,   # M7 P8a (was 0x60000000; poolmap.SHIP_GATE)
           "spread": 2, "spread_min_count": 256,
          "max_slot_ops": 512, "width_buckets": True}
@@ -119,15 +126,15 @@ def block_pool(memory_width, k, heat=None):
 
 
 def reconstruct(counts_path, knobs=None, heat=None):
-    """(BlockPool with every block placed, frozen counts) -- the build's layout, from its counts.
+    """(BlockPool with every block placed, frozen counts) -- the build's layout, from its counts. Read the blocks
+    with doomfj.pool_report (bases, block_bits, sub_blocks).
     `heat`: the list the build was placed with (--pin-heat), or None; a heat build's hot groups sit
     FIRST, so without it every base after them re-derives wrong."""
     k = dict(KNOBS)
     k.update(knobs or {})
     fr = load_counts(counts_path)
     pool = block_pool(W, k, heat)
-    pool.alias = dict(fr["alias"])
-    pool.lay_out(dict(fr["counts"]), {g: dict(h) for g, h in fr["width_hist"].items()})   # place_deferred's layout step
+    pool_report.lay_out(pool, fr["width_hist"])                    # place_deferred's layout step
     return pool, fr
 
 

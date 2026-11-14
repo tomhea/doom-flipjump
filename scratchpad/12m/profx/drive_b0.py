@@ -74,7 +74,7 @@ def run(prefix, o):
         sys.path.insert(0, str(q))
     import probe as P                                                         # noqa: E402
     import b0_scenarios as B                                                  # noqa: E402
-    from doomfj.fastrun import _fjcore                                       # noqa: E402
+    from flipjump.interpreter import _fjcore                              # noqa: E402 (the extension itself: its binary's path, and prof_*)
     assert _fjcore is fj and Path(_fjcore.__file__).resolve() == engine_pyd().resolve(), _fjcore.__file__
     print("engine: %s" % _fjcore.__file__, flush=True)
 

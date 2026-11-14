@@ -119,7 +119,8 @@ if _pyd:
     _spec.loader.exec_module(_mod)
     sys.modules["flipjump.interpreter._fjcore"] = _mod
 import gamespeed as GS, m2_std_gate as gate
-from doomfj.fastrun import FjmRunner, _fjcore
+from doomfj.fastrun import FjmRunner
+from flipjump.interpreter import _fjcore  # the extension itself: its binary's path
 if _pyd and Path(_fjcore.__file__).resolve() != Path(_pyd).resolve():
     raise SystemExit("MSFRAME_FJCORE_PYD injection failed: engine is %s" % _fjcore.__file__)
 _eng_sha = hashlib.sha256(Path(_fjcore.__file__).read_bytes()).hexdigest()[:16]

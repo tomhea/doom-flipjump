@@ -26,26 +26,26 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT))
 
-from flipjump.fjm.fjm_consts import (_header_base_format, _header_extension_format,  # noqa: E402
-                                     _segment_format, _segments_size_format, _LZMA_FORMAT,
-                                     _lzma_compression_filters)
+from flipjump.fjm.fjm_consts import (HEADER_BASE_FORMAT, HEADER_EXTENSION_FORMAT,  # noqa: E402
+                                     SEGMENT_FIELDS, SEGMENTS_SIZE_FORMAT, LZMA_FORMAT,
+                                     lzma_compression_filters, segment_field_size)
 
 FJM = Path(sys.argv[1] if len(sys.argv) > 1
            else r"C:\Users\tomhe\AppData\Local\Temp\tmp97fndv92\m14.fjm")
 blob = FJM.read_bytes()
-off = calcsize(_header_base_format)
-_magic, word_size, version, segment_num = unpack(_header_base_format, blob[:off])
+off = calcsize(HEADER_BASE_FORMAT)
+_magic, word_size, version, segment_num = unpack(HEADER_BASE_FORMAT, blob[:off])
 if version != 0:
-    off += calcsize(_header_extension_format)
+    off += calcsize(HEADER_EXTENSION_FORMAT)
 if version == 4:                 # .fjm v4 (flipjump 1.6.0's default): the segment table is its own LZMA stream,
-    (table_bytes,) = unpack(_segments_size_format, blob[off:off + calcsize(_segments_size_format)])   # A11
-    off += calcsize(_segments_size_format) + table_bytes
+    (table_bytes,) = unpack(SEGMENTS_SIZE_FORMAT, blob[off:off + calcsize(SEGMENTS_SIZE_FORMAT)])   # A11
+    off += calcsize(SEGMENTS_SIZE_FORMAT) + table_bytes
 else:
-    off += calcsize(_segment_format) * segment_num
+    off += SEGMENT_FIELDS * segment_field_size(word_size) * segment_num
 
 NICE = 2 * word_size
-READER = _lzma_compression_filters(NICE, lzma.PRESET_DEFAULT)   # what the decoder is handed today
-raw = lzma.decompress(blob[off:], format=_LZMA_FORMAT, filters=READER)
+READER = lzma_compression_filters(NICE, lzma.PRESET_DEFAULT)   # what the decoder is handed today
+raw = lzma.decompress(blob[off:], format=LZMA_FORMAT, filters=READER)
 baseline = len(blob[off:])
 print(f"{FJM.name}: {len(raw):,} raw bytes; shipped compressed size {baseline:,}")
 print(f"reader filter spec: {READER}\n")
@@ -71,10 +71,10 @@ CANDIDATES = [
 print(f"{'candidate':<38}{'compress s':>12}{'size MB':>10}{'vs shipped':>12}{'reader ok':>11}")
 for name, filters in CANDIDATES:
     t0 = time.perf_counter()
-    out = lzma.compress(raw, format=_LZMA_FORMAT, filters=filters)
+    out = lzma.compress(raw, format=LZMA_FORMAT, filters=filters)
     dt = time.perf_counter() - t0
     try:                                    # decode with the READER's spec, not this candidate's
-        ok = lzma.decompress(out, format=_LZMA_FORMAT, filters=READER) == raw
+        ok = lzma.decompress(out, format=LZMA_FORMAT, filters=READER) == raw
     except lzma.LZMAError:
         ok = False
     print(f"{name:<38}{dt:>12.1f}{len(out)/1e6:>10.1f}{len(out)/baseline:>11.3f}x"

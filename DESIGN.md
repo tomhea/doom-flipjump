@@ -320,7 +320,9 @@ is summed from — its C5 control):
   build command passes) `_bucket_layout` lays out one sub-block per table width and then rounds the
   WHOLE BLOCK up to a power of two: `1 << max(0, (offset - 1).bit_length())`. This term exists only
   on that path — on the uniform path the block IS its slots, and `poolmap.py --no-width-buckets`
-  duly prints it as 0.
+  duly prints it as 0. (Since flipjump 1.6.0 the pool always buckets by width: the uniform path,
+  `_bucket_layout` and `--no-width-buckets` are September's; poolmap's C5 shows the same on a
+  one-bucket block.)
 * **unused slots — 20,301,536 words, 68.7%.** A bucket's slots are its table count rounded up to a
   power of two, times `--spread 2` for a group above `--spread-min-count 256`, so every slot past
   the count is never written. `BlockPool.__init__` states the consequence for this ledger out loud:

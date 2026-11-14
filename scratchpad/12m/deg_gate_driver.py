@@ -46,6 +46,7 @@ import flipjump as fj                                                   # noqa: 
 from flipjump import FixedIO                                            # noqa: E402
 from flipjump.assembler.inner_classes.table_pool import BlockPool                     # noqa: E402
 from flipjump.utils.exceptions import FlipJumpException                 # noqa: E402
+from doomfj import pool_report                                          # noqa: E402
 from doomfj.harness import W                                            # noqa: E402
 
 DEG_GATE = ROOT / "scratchpad" / "deg_gate.py"
@@ -79,14 +80,15 @@ def verdict(status, pool, *, restricted=False):
     """
     if pool is None:                    # the --off baseline: no pass to be vacuous about
         return status
-    if pool.allocated == 0:
+    stats = pool_report.stats(pool)
+    if stats["moved"] == 0:
         return _vacuous(status, restricted,
                         "the pool relocated NOTHING (0 allocated, %s declined) -- this run is the "
-                        "stock program, whatever the gate said" % format(pool.declined, ","))
+                        "stock program, whatever the gate said" % format(stats["declined"], ","))
     if not pool.pinned:
         return _vacuous(status, restricted,
-                        "%s tables were blocked but NO word was pinned -- the arm still writes an "
-                        "address, so this is placement, not blocking" % format(pool.allocated, ","))
+                        "%s tables were moved but NO word was pinned -- the arm still writes an "
+                        "address, so this is placement, not blocking" % format(stats["moved"], ","))
     return status
 
 
@@ -214,6 +216,11 @@ def _stub_gate_run(lines, status):
     return run_driver
 
 
+def _allocated(pool):
+    """how many tables took a slot of a block"""
+    return pool_report.stats(pool)["in_blocks"]
+
+
 def build_and_run(source, tmp, name, pool):
     """-> (output, ops, cause). A mutant that DIES is a rejection, not an error, so a broken run
     comes back as an output that is not the fixture's rather than as an exception."""
@@ -273,14 +280,14 @@ def cheap_selftest(driver, table_pool, *, body_ran=None, extra=None):
     every_cell = sorted(fj.assemble([src], tmp / "labels.fjm", memory_width=W, show_progress=False))
     relocated = BlockPool(W, POOL_BASE, pin_all_but=every_cell)          # tables move; every cell stays unpinned
     out, ops, cause = build_and_run(src, tmp, "relocated", relocated)
-    check(out == inline and relocated.allocated > 0 and not relocated.pinned,
+    check(out == inline and _allocated(relocated) > 0 and not relocated.pinned,
           "relocation alone leaves the output alone",
-          "%d tables, %d pinned, %d -> %d ops" % (relocated.allocated, len(relocated.pinned), inline_ops, ops))
+          "%d tables, %d pinned, %d -> %d ops" % (_allocated(relocated), len(relocated.pinned), inline_ops, ops))
 
     counting = BlockPool(W, POOL_BASE)
     fj.assemble([src], tmp / "counting.fjm", memory_width=W, show_progress=False, table_pool=counting)
     check(counting.reads_words_raw, "fixture: it still reads a cell through hex.pointers",
-          "reads_words_raw=%s, %d groups" % (counting.reads_words_raw, len(counting.counts)))
+          "reads_words_raw=%s, %d groups" % (counting.reads_words_raw, len(counting.census)))
 
     # without pin_all_but the assembler does not know which cells are read raw: it pins NO word, for the pointer
     # runtime's sake, and the program is the same program, slower. The mutation is caught by that fallback.
@@ -298,7 +305,7 @@ def cheap_selftest(driver, table_pool, *, body_ran=None, extra=None):
     out, ops, cause = build_and_run(src, tmp, "blocked", pool)
     check(out == inline and pool.pinned,
           "blocking with the pointed-to cell left unpinned: the same program",
-          "%d pinned words, %d tables, %d ops" % (len(pool.pinned), pool.allocated, ops))
+          "%d pinned words, %d tables, %d ops" % (len(pool.pinned), _allocated(pool), ops))
 
     # --- and one mutation flipjump's test does not make: a list that names the WRONG cells (none), which is the
     # failure mode the driver's cell list can actually have.
@@ -310,23 +317,23 @@ def cheap_selftest(driver, table_pool, *, body_ran=None, extra=None):
           "output %r (%s)" % (out, cause))
 
     # --- verdict: every branch of it
-    inert = BlockPool(W, POOL_BASE, max_slot_ops=0, pin_all_but=[("d", 1)])   # relocates nothing: no slot fits
+    inert = BlockPool(W, POOL_BASE, max_slot_ops=1, pin_all_but=[("d", 1)])   # relocates nothing: no slot fits
     build_and_run(src, tmp, "inert", inert)
     status, text = capture(lambda: verdict(0, inert))
     check(status != 0 and "VACUOUS" in text, "MUTANT: a pool that relocated nothing is not a PASS",
-          "allocated=%d, exit %r" % (inert.allocated, status))
+          "allocated=%d, exit %r" % (_allocated(inert), status))
     status, text = capture(lambda: verdict(0, inert, restricted=True))
     check(status == 0 and "WARNING" in text, "... but a run RESTRICTED on purpose only warns",
           "exit %r, %r" % (status, text[4:36]))
     check(verdict(0, pool) == 0, "... while a pool that did relocate and pin passes",
-          "allocated=%d, %d pinned" % (pool.allocated, len(pool.pinned)))
+          "allocated=%d, %d pinned" % (_allocated(pool), len(pool.pinned)))
     check(verdict(1, pool) != 0, "... and the gate's own FAIL is never overridden by it")
     check(verdict(0, None) == 0, "... and --off, which has no pool at all, is not vacuous")
     # tables relocated, nothing pinned: placement wearing blocking's name -- a real pool, not a mutated one
     status, text = capture(lambda: verdict(0, relocated))
     check(status != 0 and "placement, not blocking" in text,
           "MUTANT: blocked tables but NO pinned word is not a PASS",
-          "%d pinned, %d tables, exit %r" % (len(relocated.pinned), relocated.allocated, status))
+          "%d pinned, %d tables, exit %r" % (len(relocated.pinned), _allocated(relocated), status))
 
     # --- run_gate: the factory goes in, the gate's status comes out, and flipjump is left alone
     stubs = {}

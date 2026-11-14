@@ -51,7 +51,8 @@ from common import W, label_dict  # noqa: E402
 from fjmimage import FjmImage  # noqa: E402
 from pool import KNOBS, _tokens, eval_key, load_heat, reconstruct  # noqa: E402
 
-from flipjump.assembler.preprocessor import heat_key  # noqa: E402
+from flipjump.assembler.inner_classes.table_pool import heat_key  # noqa: E402
+from doomfj import pool_report  # noqa: E402
 
 DEFAULT_HOT = PROFX / "hotwords_blocked27.json"
 LOG_RE = {
@@ -158,8 +159,8 @@ def report(image, lab, hot, recon=None):
             continue
         v = image.word(addr // W)
         exp_base = exp_bits = None
-        if pool is not None and key in pool.groups:
-            exp_base, exp_bits = pool.groups[key][0], pool._block_bits(key)
+        if pool is not None and key in pool_report.bases(pool):
+            exp_base, exp_bits = pool_report.bases(pool)[key], pool_report.block_bits(pool, key)
         bits = exp_bits or h["block_bits"]
         base = (v & ~(bits - 1)) if v is not None else 0
         if base < KNOBS["pool_base"]:

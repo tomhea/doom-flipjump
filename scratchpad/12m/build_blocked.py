@@ -46,6 +46,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
 from flipjump.assembler.inner_classes.table_pool import HotSite                      # noqa: E402
+from doomfj import pool_report                                          # noqa: E402
 from doomfj.build import Assembly, build_wall_renderer                  # noqa: E402
 from doomfj.config import Config                                        # noqa: E402
 from doomfj.harness import W, SHIP_LZMA_PRESET                          # noqa: E402
@@ -128,64 +129,18 @@ def _pack_kw(a):
 def _preflight(pool, a):
     """Price the layout the one-pass pool placed: its blocks' demand against the pool's capacity (flipjump's
     BlockPool refuses a pool too small for its blocks, so every group is placed). Reports; does not decide."""
-    demand = sum(pool._block_bits(g) for g in pool.counts)
+    demand = pool_report.demand_bits(pool)
     if getattr(a, "pack_blocks", False):
         print("  PREFLIGHT (--pack-blocks): the packed blocks end %s words past the pool base (the demand below is "
-              "the blocks' whole sizes, unpacked)" % format(pool._used // W, ","), flush=True)
+              "the blocks' whole sizes, unpacked)" % format(pool_report.extent_bits(pool) // W, ","), flush=True)
     limit = (1 << W) if pool.pool_end is None else min(1 << W, pool.pool_end)
     capacity = limit - a.pool_base
-    placed = len(pool.groups)
+    placed = len(pool_report.bases(pool))
     print("  PREFLIGHT: demand %s words, capacity %s words (%.1f%% used); %s of %s groups placed"
           % (format(demand // W, ","), format(capacity // W, ","),
-             100.0 * demand / capacity, format(placed, ","), format(len(pool.counts), ",")),
+             100.0 * demand / capacity, format(placed, ","), format(len(pool.blocks), ",")),
           flush=True)
     return demand, capacity, placed
-
-
-def _report_width_waste(counting):
-    """How much of the pool goes to PADDING rather than to tables.
-
-    A block's slots are uniform, so the group's widest table sets the width of every slot in it.
-    `widths` is a max and hides this: a group of 32,768 eight-op tables plus one 514-op table looks
-    identical to a group of 32,769 wide ones. The counting pass keeps the distribution so the two
-    can be told apart -- and the answer decides whether splitting groups by width is worth building.
-
-    Accounting only. Reports ops, not bits, so it reads against `max_slot_ops` directly.
-    """
-    alloc = pad_width = pad_count = real = 0
-    mixed = mixed_tables = 0
-    worst = []
-    for g, n in counting.counts.items():
-        hist = counting.width_hist.get(g)
-        if not hist:
-            continue
-        slots = 1 << max(0, (n - 1).bit_length())
-        wmax = max(hist)
-        slot_ops = 1 << max(0, (wmax - 1).bit_length())
-        alloc += slots * slot_ops
-        pad_count += (slots - n) * slot_ops
-        for w, c in hist.items():
-            real += c * w
-            pad_width += c * (slot_ops - w)
-        # "mixed" = the widest table is more than twice the most COMMON one, i.e. a few wide
-        # tables are dragging many narrow ones up.
-        common = max(hist, key=lambda w: (hist[w], -w))
-        if wmax > 2 * common:
-            mixed += 1
-            mixed_tables += n
-            worst.append((n * (slot_ops - common), g, n, common, wmax))
-    if not alloc:
-        return
-    print("  width waste: %s ops allocated = %s real + %s width-pad + %s count-pad"
-          % (format(alloc, ","), format(real, ","), format(pad_width, ","), format(pad_count, ",")),
-          flush=True)
-    print("  MIXED groups (widest > 2x most-common): %s groups, %s tables; splitting them by width "
-          "would free up to %s ops of pool"
-          % (format(mixed, ","), format(mixed_tables, ","),
-             format(sum(w[0] for w in worst), ",")), flush=True)
-    for cost, g, n, common, wmax in sorted(worst, reverse=True)[:5]:
-        print("    %14s ops  %-44s n=%-7s common=%-5s widest=%s"
-              % (format(cost, ","), g[:44], format(n, ","), common, wmax), flush=True)
 
 
 def pool_knobs(a, heat=None) -> dict:
@@ -215,7 +170,7 @@ def report_pins(pool, heat, labels=None):
     """the pool's FINAL pin map (pinned: after every pin that could not hold was dropped), the collapse alarm,
     and the hot words that did not end up pinned"""
     pinned = pool.pinned
-    groups = len(pool.groups)
+    groups = len(pool_report.bases(pool))
     print("  pins: %s words pinned, %s groups blocked" % (format(len(pinned), ","), format(groups, ",")), flush=True)
     # A COLLAPSE IS SILENT OTHERWISE (spread=4 once fell from 25,701 pinned words to 72, built fine and passed the gate)
     if groups and len(pinned) < max(1, groups // 10):      # none at all, on a program of < 10 groups
@@ -224,7 +179,8 @@ def report_pins(pool, heat, labels=None):
               flush=True)
     if heat and labels is not None:
         # a hot word that did not end up pinned: a raw cell (pin_all_but), an alias conflict, or a pin that cannot hold
-        hot = [(g, pool.groups[g][1]) for g in pool.hot_sites if g in pool.groups and pool.groups[g][1] is not None]
+        words = pool_report.blocked_words(pool)
+        hot = [(g, words[g]) for g in pool_report.hot_groups(pool) if g in words]
         lost = [g for g, expr in hot if expr.exact_eval(labels) not in pinned]
         print("  pin-heat: %d of %d hot words pinned%s"
               % (len(hot) - len(lost), len(hot), "; NOT pinned: %s" % lost[:5] if lost else ""), flush=True)
@@ -390,36 +346,37 @@ def main(argv=None, labels_out=None):
           " every other word may be pinned" % (len(cells), [c for c in cells if not isinstance(c, str)],
                                                [c for c in cells if isinstance(c, str)]), flush=True)
     for pool in pools:
-        print("  one pass: %s tables deferred, %s alias words unresolved; the census: %s groups, %s tables; "
+        stats, census = pool_report.stats(pool), pool.merged_census()
+        print("  one pass: %s tables deferred; the census: %s groups, %s tables; "
               "%s declined (too wide for any slot)"
-              % (format(pool.deferred, ","), format(pool.alias_unresolved, ","), format(len(pool.counts), ","),
-                 format(sum(pool.counts.values()), ","), format(pool.declined, ",")), flush=True)
+              % (format(stats["moved"], ","), format(len(census), ","),
+                 format(sum(sum(widths.values()) for widths in census.values()), ","),
+                 format(stats["declined"], ",")), flush=True)
         _preflight(pool, a)
         report_pins(pool, heat, labels)
     last = pools[-1]
     if a.counts_cache:
-        census = last.census()
-        _save_counts(a.counts_cache, a, {"counts": census.counts, "widths": census.widths,
-                                         "width_hist": census.width_hist, "alias": census.alias})
+        _save_counts(a.counts_cache, a, pool_report.counts_blob(last))
     if heat:
-        print("  pin-heat: %s" % last.heat_report(), flush=True)
+        print("  pin-heat: %s" % pool_report.heat_report(last), flush=True)
     if a.record_sites:
         write_sites(a.record_sites, a, last)
     print("assemblies: %d; blocked per assembly: %s"
-          % (len(pools), ", ".join(format(q.allocated, ",") for q in pools)), flush=True)
-    print("declined (too wide for any slot): %s" % format(last.declined, ","), flush=True)
+          % (len(pools), ", ".join(format(pool_report.stats(q)["in_blocks"], ",") for q in pools)), flush=True)
+    stats = pool_report.stats(last)
+    print("declined (too wide for any slot): %s" % format(stats["declined"], ","), flush=True)
     # BROKEN GROUPS is the number that matters, not the decline count: `pinned_words` excludes a
     # broken group ENTIRELY, so one declined table un-pins every sibling table in its group.
     print("broken groups: %s of %s (these lose their pin for ALL their tables)"
-          % (format(len(last.broken_groups), ","), format(len(last.counts), ",")), flush=True)
+          % (format(len(pool_report.broken_groups(last)), ","), format(len(last.blocks), ",")), flush=True)
     if last.unpins:
         print("unpinned (a pin that could not hold), by why: %s" % dict(last.unpins), flush=True)
     if heat:
-        print("pin-heat after the last assembly: %s" % last.heat_report(), flush=True)
+        print("pin-heat after the last assembly: %s" % pool_report.heat_report(last), flush=True)
     print("blocked: %s tables in %s groups; declined %s; ungrouped %s"
-          % (format(last.allocated, ","), format(len(last.groups), ","),
-             format(last.declined, ","), format(last.ungrouped, ",")), flush=True)
-    if last.allocated == 0:
+          % (format(stats["in_blocks"], ","), format(len(pool_report.bases(last)), ","),
+             format(stats["declined"], ","), format(stats["ungrouped"], ",")), flush=True)
+    if stats["in_blocks"] == 0:
         print("*** NOTHING WAS BLOCKED", flush=True)
     print("total %ds" % int(time.time() - t0), flush=True)
     return 0

@@ -33,10 +33,10 @@ from flipjump.interpreter.io_devices.device_memory import NativeDeviceMemory
 
 from doomfj.config import RENDER_FLAT_MAX_WORDS   # R6: ONE flat limit, not twelve literals
 
-try:                                          # the native engine is optional (a source install
-    from flipjump.interpreter import _fjcore  # without the built C extension still works)
+try:                                          # the native engine is optional (a source install without
+    from flipjump import native as _fjcore    # the built C extension still works). `_fjcore` here is
 except ImportError:                           # pragma: no cover
-    _fjcore = None
+    _fjcore = None                            # flipjump's public module, flipjump.native
 
 
 class FjmRunner:

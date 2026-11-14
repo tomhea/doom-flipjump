@@ -299,8 +299,8 @@ knobs into `build_wall_renderer(..., assembly=build.Assembly(lzma_preset, pool=.
 `spread_factor` / `spread_min_tables` / `pin_incomplete_groups`), the build gives each assembly a fresh `BlockPool`
 whose `pin_all_but` is the cells the program reads raw (`selfreset.pin_all_but_cells`: the byte arrays over their
 reachable cells and every `POINTER_READ_CELLS` label the emitted program declares -- the words `--pin-state-cells`
-always left unpinned), and the pins, the census and `--record-sites` are read off the pool (`pinned`, `census()`,
-`table_sites`). The labels are what flipjump's `assemble` returns. It needs flipjump >= b1365b5 (1.6.0 with #394:
+always left unpinned), and the pins, the census and `--record-sites` are read off the pool (`pinned`, `merged_census()`,
+`table_sites`). The labels are what flipjump's `assemble` returns. It needs flipjump >= 7a49ef1 (1.6.0 after its review, flipjump#395-#397; b1365b5 was 1.6.0 with #394:
 `table_pool` in `flipjump.assembler.inner_classes`, `BlockPool.report` gone; neither changed an output -- E1M8 rebuilt
 on it BYTE-IDENTICAL, `9311cd67`, 809 s).
 

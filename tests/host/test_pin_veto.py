@@ -9,7 +9,7 @@ part of the value. NEW GAME's restart writes the runtime things' positions and b
 `selfreset.POINTER_READ_CELLS` label (flipjump's label-alone form: the cell runs to the next label), besides the
 byte cells over their reachable extent.
 
-The words are resolved by flipjump's OWN BlockPool.unpinned_words, so this holds the list to what the assembler
+The words are resolved by flipjump's OWN BlockPool.unpinned_cells, so this holds the list to what the assembler
 leaves unpinned, not to a model of it. R9: the same list with POINTER_READ_CELLS emptied leaves the positions
 pinnable, and the check says so; a pointer label the program lacks is never named.
 """
@@ -34,9 +34,9 @@ def _cells():
 def _unpinned(cells):
     """the WORD addresses flipjump's pool leaves unpinned for `cells`"""
     pool = BlockPool(W, 1 << 26, pin_all_but=cells)
-    words = pool.unpinned_words(LABELS)
-    assert not pool.pin_all_but_missing, pool.pin_all_but_missing
-    return {b // W for b in words}
+    cells, missing = pool.unpinned_cells(LABELS)          # the cells, as (start, end) bit addresses
+    assert not missing, missing
+    return {word for start, end in cells for word in range(start // W, end // W)}
 
 
 def _span(name, nxt):

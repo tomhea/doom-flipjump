@@ -568,7 +568,7 @@ def main():
     # P9: THE HALT. The program presents exactly FRAMES frames and then ENDS by looping (enter on EXIT in frame
     # HALT_FRAME); the oracle's menu, stepped one more frame, must say the same (MENU_HALTED). The R9 control
     # makes the oracle ignore that enter: then it expects a frame the program never presents.
-    from flipjump.interpreter import _fjcore as _core
+    from flipjump import native as _core
     _m, _s, _sel, _ng, _live = menu_step(mode, scr, sel, set(fks[HALT_FRAME].menu) if HALT_FRAME < len(fks)
                                          else set(), live, automap=AM)
     if args.selftest_exit and _s == MENU_HALTED:

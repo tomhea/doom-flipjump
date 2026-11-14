@@ -44,6 +44,7 @@ if __name__ == "__main__":                       # M8 G13: `--map E1Mn` before t
     from doomfj.mapprofile import take_map_arg
     take_map_arg()
 from flipjump.assembler.inner_classes.table_pool import heat_key                         # noqa: E402
+from doomfj import pool_report                                              # noqa: E402
 from common import (W, active_map, check_census_map, default_counts_cache, default_fjm, default_labels,  # noqa: E402
                     label_dict, load_sparse, work_dir)
 from fjmimage import FjmImage                                               # noqa: E402
@@ -97,7 +98,8 @@ def main():
     # pinned proves nothing). Measured on adopt2: 41,006 at their base (the build's "pins") + 3,733 without; at
     # --spread 1 (the wrong knob) 41,005 carry a WRONG base.
     agree = n = nobase = 0
-    for g, (base, _e) in pool.groups.items():
+    bases = pool_report.bases(pool)
+    for g, base in bases.items():
         addr = eval_key(g, lab)
         if addr is None:
             continue
@@ -115,7 +117,7 @@ def main():
         raise SystemExit("the counts cache does not describe this binary -- not written")
 
     # ops per executed table, per group (self counts of pool words inside each block)
-    placed = sorted((base, pool._block_bits(g), g) for g, (base, _e) in pool.groups.items())
+    placed = sorted((base, pool_report.block_bits(pool, g), g) for g, base in bases.items())
     bases_w = np.array([b // W for b, _bits, _g in placed], dtype=np.int64)
     ws, cs = load_sparse(prefix + ".self.bin")
     m = ws >= KNOBS["pool_base"] // W
@@ -155,13 +157,13 @@ def main():
             continue
         at = {address: (heat_key(site), occurrence, slot_ops_of(slot_ops, KNOBS["max_slot_ops"]))
               for site, occurrence, slot_ops, address in recorded if address}
-        base, bits = pool.groups[g][0], pool._block_bits(g)
-        layout, _ = pool._bucket_layout(g)
+        base = bases[g]
+        layout = pool_report.sub_blocks(pool, g)
         tables = {}
         unmapped = 0
         for wv, c in per_group[g].items():
             off = wv * W - base
-            for s, (boff, slots, _count) in layout.items():
+            for s, (boff, slots) in layout.items():
                 sb = s * OP_BITS
                 if boff <= off < boff + slots * sb:
                     start = base + boff + ((off - boff) // sb) * sb

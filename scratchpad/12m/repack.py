@@ -10,7 +10,7 @@ ship artifact pays the 581 s. (The writer's own `lzma_preset` also REJECTS the |
 
 Measured on P7B.fjm (2026-09-05): 15,168,954 -> 14,080,237 bytes (-7.18%); decode 1.11 s -> 1.00 s
 (faster: less data to pull). Requires the flipjump-151 reader dict bump (dict_size 1<<26 in
-_LZMA_DECOMPRESSION_FILTERS), which still reads every old preset-6 file.
+LZMA_DECOMPRESSION_FILTERS), which still reads every old preset-6 file.
 
 VERIFICATION IS PART OF THE TOOL: after writing, it re-reads BOTH files through the flipjump
 package's OWN reader filters and requires bit-identical decompressed images. R9 negative control
@@ -25,8 +25,7 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, "C:/Users/tomhe/Documents/flipjump-151")
-from flipjump.fjm.fjm_consts import _LZMA_DECOMPRESSION_FILTERS, _LZMA_FORMAT  # noqa: E402
+from flipjump.fjm.fjm_consts import LZMA_DECOMPRESSION_FILTERS, LZMA_FORMAT
 
 HEADER = 64          # magic+version header, extension, one segment record -- verified on P7B
 FILTERS_9E = [{"id": lzma.FILTER_LZMA2, "preset": 9 | lzma.PRESET_EXTREME}]
@@ -41,8 +40,8 @@ def read_image(path):
     if (version, segment_num) != (3, 1):
         raise SystemExit("!! %s is .fjm version %d with %d segments: repack reads only a version-3 file of one "
                          "segment (HEADER = 64)" % (path, version, segment_num))
-    return data[:HEADER], lzma.decompress(data[HEADER:], format=_LZMA_FORMAT,
-                                          filters=_LZMA_DECOMPRESSION_FILTERS)
+    return data[:HEADER], lzma.decompress(data[HEADER:], format=LZMA_FORMAT,
+                                          filters=LZMA_DECOMPRESSION_FILTERS)
 
 
 def repack(src, dst):
@@ -50,7 +49,7 @@ def repack(src, dst):
     header, raw = read_image(src)
     print("decoded %s bytes from %s" % (format(len(raw), ","), src))
     t = time.time()
-    blob = lzma.compress(raw, format=_LZMA_FORMAT, filters=FILTERS_9E)
+    blob = lzma.compress(raw, format=LZMA_FORMAT, filters=FILTERS_9E)
     print("encoded 9|EXTREME in %.0f s" % (time.time() - t))
     Path(dst).write_bytes(header + blob)
 

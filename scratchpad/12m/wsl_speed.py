@@ -27,7 +27,7 @@ from pathlib import Path
 
 from flipjump.fjm import fjm_reader
 from flipjump.fjm.fjm_reader import GarbageHandling
-from flipjump.interpreter import _fjcore
+from flipjump import native as _fjcore
 from flipjump.interpreter.io_devices.KeyboardIO import KeyboardIO, KeyEvent, ScriptedKeyEventSource
 from flipjump.interpreter.io_devices.ScreenIO import InMemoryScreen
 from flipjump.interpreter.io_devices.device_memory import NativeDeviceMemory

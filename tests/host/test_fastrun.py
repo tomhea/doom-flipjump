@@ -69,6 +69,12 @@ native_only = pytest.mark.skipif(
 )
 
 
+@native_only
+def test_the_engine_is_reached_through_flipjumps_public_module():
+    import flipjump.native
+    assert fastrun._fjcore is flipjump.native
+
+
 # --------------------------------------------------------------------------- forging .fjm files
 
 def _forge(width: int, byte: int = OUT_BYTE, self_modifying: bool = False):

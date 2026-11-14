@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
 if __name__ == "__main__":                       # M8 G13: `--map E1Mn` before the defaults are read
     from doomfj.mapprofile import take_map_arg
     take_map_arg()
+from doomfj import pool_report  # noqa: E402
 from common import (HERE, ROOT, W, active_map, check_census_map, default_counts_cache, default_fjm,  # noqa: E402
                     default_labels, label_dict, load_sparse, work_dir)
 from fjmimage import FjmImage  # noqa: E402
@@ -70,16 +71,16 @@ def main():
     print("fjm %s (sha256 %s...), %d game frames in %s" % (fjm.name, hashlib.sha256(fjm.read_bytes()).hexdigest()[:16],
                                                         F, Path(prefix).name))
     print("counts cache %s: %d groups, %d tables; reconstructed blocks: %d placed, %d without room"
-          % (Path(a.counts_cache).name, len(fr["counts"]), sum(fr["counts"].values()), len(pool.groups),
-             len(pool.broken_groups)))
+          % (Path(a.counts_cache).name, len(fr["counts"]), sum(fr["counts"].values()), len(pool_report.bases(pool)),
+             len(pool.blocks) - len(pool_report.bases(pool))))
 
     # every placed group: its block, and its source word in this build
     groups = []
     # a word the build did not pin (pin-exclude: byte and pointer-read cells) rests with NO base -- no evidence either
     # way; the control is the words that carry one (heatsites.py says why, with its numbers and its wrong-knob control)
     agree = disagree = unresolved = nobase = 0
-    for g, (base, _e) in pool.groups.items():
-        bits = pool._block_bits(g)
+    for g, base in pool_report.bases(pool).items():
+        bits = pool_report.block_bits(pool, g)
         addr = eval_key(g, lab)
         if addr is None:
             unresolved += 1

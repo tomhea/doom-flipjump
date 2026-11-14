@@ -56,9 +56,10 @@ import struct
 import sys
 from pathlib import Path
 
-from flipjump.fjm.fjm_consts import (FJ_MAGIC, FJMVersion, _LZMA_DECOMPRESSION_FILTERS,
-                                     _LZMA_FORMAT, _header_base_format, _header_base_size,
-                                     _header_extension_size, _segment_format, _segment_size)
+from flipjump.fjm.fjm_consts import (FJ_MAGIC, FJMVersion, LZMA_DECOMPRESSION_FILTERS,
+                                     LZMA_FORMAT, HEADER_BASE_FORMAT, HEADER_BASE_SIZE,
+                                     HEADER_EXTENSION_SIZE, SEGMENT_FIELDS, pack_segments, segment_field_size,
+                                     unpack_segments)
 from flipjump.fjm.fjm_reader import read_fjm_raw
 from flipjump.utils.exceptions import FlipJumpReadFjmException
 
@@ -104,8 +105,8 @@ def read_fjm_size(path):
     """
     path = Path(path)
     with open(path, "rb") as fh:
-        head = fh.read(_header_base_size)
-    magic = struct.unpack(_header_base_format, head)[0] if len(head) == _header_base_size else None
+        head = fh.read(HEADER_BASE_SIZE)
+    magic = struct.unpack(HEADER_BASE_FORMAT, head)[0] if len(head) == HEADER_BASE_SIZE else None
     if magic != FJ_MAGIC:
         raise ValueError("%s: bad magic %s (expected 0x%x) -- not an .fjm?"
                          % (path, "none" if magic is None else "0x%x" % magic, FJ_MAGIC))
@@ -125,10 +126,10 @@ def read_fjm_size(path):
 def _v3_segments(raw):
     """THE PRE-v4 PARSE (what read_fjm_size did until A11), kept only for control C6: the segment
     records read straight after the header extension"""
-    _magic, _w, version, segment_num = struct.unpack(_header_base_format, raw[:_header_base_size])
-    off = _header_base_size + (_header_extension_size if version != FJMVersion.BaseVersion.value else 0)
-    return [struct.unpack(_segment_format, raw[off + i * _segment_size:off + (i + 1) * _segment_size])
-            for i in range(segment_num)]
+    _magic, width, version, segment_num = struct.unpack(HEADER_BASE_FORMAT, raw[:HEADER_BASE_SIZE])
+    off = HEADER_BASE_SIZE + (HEADER_EXTENSION_SIZE if version != FJMVersion.BaseVersion.value else 0)
+    table = segment_num * SEGMENT_FIELDS * segment_field_size(width)
+    return unpack_segments(raw[off:off + table], width)
 
 
 # ----------------------------------------------------------------------------------------------
@@ -161,12 +162,11 @@ def _synth_fjm(memory_width, segments, data_words):
     """
     word_bytes = memory_width // 8
     payload = b"\x00" * (data_words * word_bytes)
-    head = struct.pack(_header_base_format, FJ_MAGIC, memory_width,
+    head = struct.pack(HEADER_BASE_FORMAT, FJ_MAGIC, memory_width,
                        int(FJMVersion.CompressedVersion.value), len(segments))
     head += struct.pack("<QL", 0, 0)                       # the flags/reserved extension
-    for seg in segments:
-        head += struct.pack(_segment_format, *seg)
-    comp = lzma.compress(payload, format=_LZMA_FORMAT, filters=_LZMA_DECOMPRESSION_FILTERS)
+    head += pack_segments(segments, memory_width)
+    comp = lzma.compress(payload, format=LZMA_FORMAT, filters=LZMA_DECOMPRESSION_FILTERS)
     return head + comp
 
 
@@ -216,8 +216,8 @@ def selftest():
         #     divided a 2x-larger payload by 4 and reported 2x the words.
         f64 = _assemble_tiny(tmp, 64)
         g64 = read_fjm_size(f64)
-        old_reader_words = len(lzma.decompress(Path(f64).read_bytes()[64:], format=_LZMA_FORMAT,
-                                               filters=_LZMA_DECOMPRESSION_FILTERS)) // 4
+        old_reader_words = len(lzma.decompress(Path(f64).read_bytes()[64:], format=LZMA_FORMAT,
+                                               filters=LZMA_DECOMPRESSION_FILTERS)) // 4
         check("C2 w=64 file is read as w=64", g64.memory_width == 64)
         check("C2 w=64 word count is NOT the payload/4",
               g64.data_words != old_reader_words,
@@ -239,8 +239,8 @@ def selftest():
               g2.span_words == (1 << 20) + 60,
               "got %s, want %s" % (format(g2.span_words, ","), format((1 << 20) + 60, ",")))
         try:
-            old = len(lzma.decompress(two[64:], format=_LZMA_FORMAT,
-                                      filters=_LZMA_DECOMPRESSION_FILTERS)) // 4
+            old = len(lzma.decompress(two[64:], format=LZMA_FORMAT,
+                                      filters=LZMA_DECOMPRESSION_FILTERS)) // 4
             check("C3 the old 64-byte slice gets this WRONG", old != 60, "old-reader=%s" % old)
         except lzma.LZMAError:
             check("C3 the old 64-byte slice cannot even decompress it", True,

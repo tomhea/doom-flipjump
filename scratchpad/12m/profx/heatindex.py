@@ -15,6 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import ROOT, load_sparse, work_dir  # noqa: E402
 from pool import reconstruct  # noqa: E402
+from doomfj import pool_report  # noqa: E402
 
 #     python heatindex.py games [hotwords_blocked27.json]
 prefix = str(work_dir() / sys.argv[1])
@@ -27,15 +28,15 @@ tot_now = tot_opt = 0.0
 print("%-60s %10s %12s %12s %8s" % ("group", "disp/fr", "arm now/fr", "heat-ord/fr", "saving"))
 for h in hot["words"]:
     g = h["key"]
-    base, bits = pool.groups[g][0], pool._block_bits(g)
-    layout, _ = pool._bucket_layout(g)
+    base, bits = pool_report.bases(pool)[g], pool_report.block_bits(pool, g)
+    layout = pool_report.sub_blocks(pool, g)
     lo, hi = base // 32, (base + bits) // 32
     m = (ws >= lo) & (ws < hi)
     offs = ws[m] * 32 - base
     ops = cs[m]
     tables = {}
     for off, c in zip(offs.tolist(), ops.tolist()):
-        for slot_ops, (boff, slots, count) in layout.items():
+        for slot_ops, (boff, slots) in layout.items():
             sb = slot_ops * 64
             if boff <= off < boff + slots * sb:
                 key = (slot_ops, (off - boff) // sb)
@@ -45,7 +46,7 @@ for h in hot["words"]:
     disp = h["dispatches_per_frame"] * F
     scale = disp / tops if tops else 0.0
     now = opt = 0.0
-    for slot_ops, (boff, slots, count) in layout.items():
+    for slot_ops, (boff, slots) in layout.items():
         sb = slot_ops * 64
         mine = sorted(((v, idx) for (so, idx), v in tables.items() if so == slot_ops), reverse=True)
         for v, idx in mine:

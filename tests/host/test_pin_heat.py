@@ -26,6 +26,7 @@ from pathlib import Path
 import pytest
 from flipjump.assembler.inner_classes.table_pool import BlockPool, HotSite
 
+from doomfj import pool_report
 from doomfj.harness import W
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -72,33 +73,34 @@ def _pool(k, heat):
     # the build command's flags, as build_blocked.pool_knobs maps them: --span-bits is a length from --pool-base
     pool = BlockPool(W, k["pool_base"], pool_end=k["pool_base"] + k["span_bits"], spread_factor=k["spread"],
                      spread_min_tables=k["spread_min_count"], max_slot_ops=k["max_slot_ops"], heat=heat)
-    pool.alias = c.get("alias") or {}
-    pool.lay_out(c["counts"], {g: {int(w): int(n) for w, n in h.items()} for g, h in c["width_hist"].items()})
+    pool_report.lay_out(pool, {g: {int(w): int(n) for w, n in h.items()} for g, h in c["width_hist"].items()})
     return pool
 
 
 def _placed_first(pool, groups):
-    first = [pool.groups[g][0] for g in groups]
-    rest = [b for g, (b, _e) in pool.groups.items() if g not in groups]
+    bases = pool_report.bases(pool)
+    first = [bases[g] for g in groups]
+    rest = [b for g, b in bases.items() if g not in groups]
     return max(first) < min(rest)
 
 
 def test_the_shipped_heat_list_fits_the_program(shipped, heat):
     assert heat and all(heat.values()), "a heat list, each group with its hot sites"
     pool = _pool(shipped, heat)
-    report = pool.heat_report()
+    report = pool_report.heat_report(pool)
     assert report["hot_groups_missing"] == report["hot_groups_ambiguous"] == 0, report
     assert report["hot_groups"] == len(heat), report            # every listed group matched once
-    assert set(pool.hot_sites) <= set(pool.groups)             # placed (a lost hot group raises)
-    assert _placed_first(pool, set(pool.hot_sites)), "the hot groups are placed first"
+    hot = set(pool_report.hot_groups(pool))
+    assert hot <= set(pool_report.bases(pool))                 # placed (a lost hot group raises)
+    assert _placed_first(pool, hot), "the hot groups are placed first"
 
 
 def test_the_checks_can_fail(shipped, heat):
     """R9: a key the program lacks is reported, and without the list the same groups are NOT first"""
     stale = dict(heat)
     stale["no.such.group"] = next(iter(heat.values()))
-    assert _pool(shipped, stale).heat_report()["hot_groups_missing"] == 1
-    hot = set(_pool(shipped, heat).hot_sites)
+    assert pool_report.heat_report(_pool(shipped, stale))["hot_groups_missing"] == 1
+    hot = set(pool_report.hot_groups(_pool(shipped, heat)))
     assert not _placed_first(_pool(shipped, None), hot), \
         "the hot groups come first even without the list -- the placement check proves nothing"
 

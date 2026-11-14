@@ -94,6 +94,7 @@ from flipjump.utils.exceptions import FlipJumpReadFjmException           # noqa:
 
 import fjmsize                                                           # noqa: E402
 from profx.pool import block_pool, load_heat                             # noqa: E402
+from doomfj import pool_report                                           # noqa: E402
 # the signature, and what it hashes, must not drift from the builder's -- import it, never copy it
 from build_blocked import _counts_sig, _load_counts                      # noqa: E402
 
@@ -130,19 +131,19 @@ def split_at(segments, pool_base_words):
 def probe_pool(memory_width, counts, widths, width_hist, alias, knobs):
     """a BlockPool that only PRICES: its census laid out (place_deferred's layout step), nothing is assembled"""
     pool = block_pool(memory_width, knobs, knobs.get("heat_list"))
-    pool.alias = dict(alias or {})
-    pool.lay_out(dict(counts), {g: dict(h) for g, h in width_hist.items()})
+    pool_report.lay_out(pool, {g: width_hist[g] for g in counts})
     return pool
 
 
 def placed_first(pool, groups):
     """every group in `groups` sits below every other placed group"""
-    first = [pool.groups[g][0] for g in groups]
-    rest = [base for g, (base, _e) in pool.groups.items() if g not in groups]
+    bases = pool_report.bases(pool)
+    first = [bases[g] for g in groups]
+    rest = [base for g, base in bases.items() if g not in groups]
     return bool(first) and bool(rest) and max(first) < min(rest)
 
 
-def pad_breakdown(pool, counts):
+def pad_breakdown(pool, width_hist):
     """the block bits, in the four nested totals the PAD line differences -- all in BITS.
 
     Each follows exactly what `_block_bits` charges, so the mechanisms cannot drift from the sizes:
@@ -158,18 +159,13 @@ def pad_breakdown(pool, counts):
     """
     ob = pool.op_bits
     totals = dict(demand=0, top=0, slots=0, occupied=0)
-    for group in counts:
-        if pool.width_buckets:
-            layout, block = pool._bucket_layout(group)
-        else:
-            # the uniform path: one implicit bucket at offset 0, so the block IS its slots
-            n_slots, slot_bits = pool._uniform_shape(group)
-            block = n_slots * slot_bits
-            layout = {slot_bits // ob: (0, n_slots, counts.get(group, 1))}
-        totals["demand"] += block
-        totals["top"] += max(off + n * so * ob for so, (off, n, _c) in layout.items())
-        totals["slots"] += sum(n * so * ob for so, (_off, n, _c) in layout.items())
-        totals["occupied"] += sum(c * so * ob for so, (_off, _n, c) in layout.items())
+    for group, widths in width_hist.items():
+        layout = pool_report.sub_blocks(pool, group)
+        tables = pool_report.slot_counts(pool, widths)
+        totals["demand"] += pool_report.block_bits(pool, group)
+        totals["top"] += max(off + n * so * ob for so, (off, n) in layout.items())
+        totals["slots"] += sum(n * so * ob for so, (_off, n) in layout.items())
+        totals["occupied"] += sum(tables[so] * so * ob for so in layout)
     return totals
 
 
@@ -268,21 +264,21 @@ def report(fjm_path, cache_path, knobs):
     pool = probe_pool(W, cache["counts"], cache["widths"], cache["width_hist"],
                       cache.get("alias"), knobs)
     if knobs.get("heat_list"):
-        rep = pool.heat_report()
+        rep = pool_report.heat_report(pool)
         print("HEAT   %s: %d hot groups placed first (%d missing, %d ambiguous) -- the rest biggest-first"
               % (knobs["heat"], rep["hot_groups"], rep["hot_groups_missing"],
                  rep["hot_groups_ambiguous"]), flush=True)
     else:
         print("HEAT   none: every group biggest-first", flush=True)
-    demand = sum(pool._block_bits(g) for g in cache["counts"]) // W
-    extent = pool._used // W
+    demand = pool_report.demand_bits(pool) // W
+    extent = pool_report.extent_bits(pool) // W
     capacity = (min(1 << W, knobs["pool_base"] + knobs["span_bits"]) - knobs["pool_base"]) // W
     print("BLOCKS %s of %s groups placed (%s broken); demand %s words, extent %s words, capacity "
           "%s words (%.1f%% used)"
-          % (format(len(pool.groups), ","), format(len(cache["counts"]), ","),
-             format(len(pool.broken_groups), ","), format(demand, ","), format(extent, ","),
+          % (format(len(pool_report.bases(pool)), ","), format(len(cache["counts"]), ","),
+             format(len(pool_report.broken_groups(pool)), ","), format(demand, ","), format(extent, ","),
              format(capacity, ","), 100.0 * demand / capacity), flush=True)
-    broken = len(pool.broken_groups)
+    broken = len(pool_report.broken_groups(pool))
     print("       demand == extent, i.e. no hole in front of any block: %s%s"
           % ("yes" if demand == extent else "NO",
              "" if not broken else
@@ -298,7 +294,7 @@ def report(fjm_path, cache_path, knobs):
     pad = demand - pool_words
     print("PAD    %s - %s = %s words INSIDE the blocks, by mechanism:"
           % (format(demand, ","), format(pool_words, ","), format(pad, ",")), flush=True)
-    t = pad_breakdown(pool, cache["counts"])
+    t = pad_breakdown(pool, cache["width_hist"])
     terms = (("block power-of-two round-up", t["demand"] - t["top"], "--width-buckets only"),
              ("alignment between buckets", t["top"] - t["slots"], "structurally 0"),
              ("unused slots", t["slots"] - t["occupied"], "count rounded up, times --spread"),
@@ -400,11 +396,11 @@ def selftest(fjm_path, cache_path, knobs):
         return 1
     pool = probe_pool(32, cache["counts"], cache["widths"], cache["width_hist"],
                       cache.get("alias"), knobs)
-    demand = sum(pool._block_bits(g) for g in cache["counts"])
+    demand = pool_report.demand_bits(pool)
 
     # C2  THE DEMAND READS THE COUNTS. Shrink the biggest group to a single table.
-    biggest = max(cache["counts"], key=lambda g: (pool._block_bits(g), g))
-    before = pool._block_bits(biggest)
+    biggest = max(cache["counts"], key=lambda g: (pool_report.block_bits(pool, g), g))
+    before = pool_report.block_bits(pool, biggest)
     shrunk = dict(cache["counts"])
     shrunk[biggest] = 1
     hist2 = dict(cache["width_hist"])
@@ -412,8 +408,8 @@ def selftest(fjm_path, cache_path, knobs):
         widest = max(hist2[biggest])
         hist2[biggest] = {widest: 1}
     pool2 = probe_pool(32, shrunk, cache["widths"], hist2, cache.get("alias"), knobs)
-    demand2 = sum(pool2._block_bits(g) for g in shrunk)
-    after = pool2._block_bits(biggest)
+    demand2 = pool_report.demand_bits(pool2)
+    after = pool_report.block_bits(pool2, biggest)
     check("C2 dropping one group's count moves the demand by that block's size",
           demand - demand2 == before - after and before > after,
           "%s -> %s words for %s" % (format(before // 32, ","), format(after // 32, ","),
@@ -431,7 +427,7 @@ def selftest(fjm_path, cache_path, knobs):
               "%s words" % format(parts["in_pool"][1], ","))
         check("C4 the pad is not negative (demand covers what was emitted)",
               demand // 32 - parts["in_pool"][1] >= 0)
-        real = pad_breakdown(pool, cache["counts"])
+        real = pad_breakdown(pool, cache["width_hist"])
         emitted = parts["in_pool"][1] * 32
         check("C5 the breakdown's total IS the demand the PAD line prices",
               real["demand"] == demand,
@@ -443,7 +439,7 @@ def selftest(fjm_path, cache_path, knobs):
 
     # C6  THE HEAT LIST IS APPLIED. With it the hot groups sit first; without it, not all of them.
     if knobs.get("heat_list"):
-        hot = set(pool.hot_sites)
+        hot = set(pool_report.hot_groups(pool))
         check("C6 priced WITH the heat list, its hot groups sit ahead of every other group",
               bool(hot) and placed_first(pool, hot), "%d hot groups" % len(hot))
         cold = probe_pool(32, cache["counts"], cache["widths"], cache["width_hist"],
@@ -464,17 +460,11 @@ def selftest(fjm_path, cache_path, knobs):
     synth = dict(knobs, pool_base=1 << 20, span_bits=1 << 20, spread=1, spread_min_count=1 << 30,
                  max_slot_ops=512, width_buckets=True, heat_list=None)
     sp = probe_pool(32, {"g": 4}, {"g": 5}, {"g": {1: 3, 5: 1}}, {}, synth)
-    b = pad_breakdown(sp, {"g": 4})
+    b = pad_breakdown(sp, {"g": {1: 3, 5: 1}})
     got = (b["demand"], b["demand"] - b["top"], b["top"] - b["slots"],
            b["slots"] - b["occupied"], b["occupied"])
     check("C5 the hand-computed block breaks down as (1024, 256, 0, 64, 704) bits",
           got == (1024, 256, 0, 64, 704), "got %s" % (got,))
-    uni = probe_pool(32, {"g": 4}, {"g": 5}, {"g": {1: 3, 5: 1}}, {},
-                     dict(synth, width_buckets=False))
-    bu = pad_breakdown(uni, {"g": 4})
-    check("C5 with --no-width-buckets the round-up term vanishes (it names --width-buckets)",
-          bu["demand"] - bu["top"] == 0 and bu["demand"] == 4 * 8 * 64,
-          "demand %s bits, round-up %s bits" % (bu["demand"], bu["demand"] - bu["top"]))
 
     print("", flush=True)
     print("SELFTEST %s%s" % ("PASS" if not fails else "FAIL",
@@ -491,7 +481,6 @@ def main():
     ap.add_argument("--spread", type=int, default=SHIP_GATE["spread"])
     ap.add_argument("--spread-min-count", type=int, default=SHIP_GATE["spread_min_count"])
     ap.add_argument("--max-slot-ops", type=int, default=SHIP_GATE["max_slot_ops"])
-    ap.add_argument("--no-width-buckets", action="store_true")
     ap.add_argument("--heat", default=None,
                     help="the build's --pin-heat list (default: ship-gate 1b's; another map its own, else E1M1's)")
     ap.add_argument("--no-heat", action="store_true", help="price the placement without a heat list")
@@ -518,7 +507,7 @@ def main():
         a.fjm = "build/doom_e1m1_blocked28.fjm"
     knobs = dict(pool_base=a.pool_base, span_bits=a.span_bits, spread=a.spread,
                  spread_min_count=a.spread_min_count, max_slot_ops=a.max_slot_ops,
-                 width_buckets=not a.no_width_buckets, tier=a.tier, map=a.map, wad=a.wad,
+                 width_buckets=True, tier=a.tier, map=a.map, wad=a.wad,
                  allow_stale=a.allow_stale, heat=None if a.no_heat else a.heat)
     if knobs["heat"]:
         path = Path(knobs["heat"]) if Path(knobs["heat"]).is_absolute() else ROOT / knobs["heat"]

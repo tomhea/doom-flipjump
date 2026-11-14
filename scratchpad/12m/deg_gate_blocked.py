@@ -35,6 +35,7 @@ import deg_gate_driver as driver                                        # noqa: 
 from flipjump.assembler.inner_classes.table_pool import BlockPool                     # noqa: E402
 from doomfj.config import Config                                        # noqa: E402
 from doomfj.harness import W                                            # noqa: E402
+from doomfj import pool_report   # noqa: E402
 from doomfj.selfreset import BYTE_ARRAY_NAMES, check_pin_all_but, declared_names, pin_all_but_cells   # noqa: E402
 
 DRIVER = "deg_gate_blocked"
@@ -86,9 +87,10 @@ def run(a):
     # the byte cells named before the assembly agree with the labels it produced (byte_arrays' geometry check)
     check_pin_all_but(cell_lists[-1], labels, Config().VIEW_W, a.subsectors)
     last = pools[-1]
+    stats = pool_report.stats(last)
     print("blocked: %s tables in %s groups; declined %s; ungrouped %s; %s words pinned"
-          % (format(last.allocated, ","), format(len(last.groups), ","),
-             format(last.declined, ","), format(last.ungrouped, ","),
+          % (format(stats["in_blocks"], ","), format(len(pool_report.bases(last)), ","),
+             format(stats["declined"], ","), format(stats["ungrouped"], ","),
              format(len(last.pinned), ",")), flush=True)
     return driver.verdict(status, last)
 

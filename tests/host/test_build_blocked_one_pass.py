@@ -26,7 +26,7 @@ sys.path.insert(0, str(ROOT / "src"))
 import flipjump as fj                                                           # noqa: E402
 from flipjump.assembler.inner_classes.table_pool import BlockPool                             # noqa: E402
 
-from doomfj import build as B, pool_report                                                   # noqa: E402
+from doomfj import build as B                                                                # noqa: E402
 
 POOL_BASE = 1 << 26                  # above everything the program reaches
 XOR = """
@@ -110,9 +110,10 @@ def test_the_census_goes_to_the_counts_cache(tmp_path, monkeypatch, capsys):
     src = tmp_path / "count.fj"
     src.write_text(XOR)
     fj.assemble([src], tmp_path / "count.fjm", memory_width=mod.W, show_progress=False, table_pool=plain)
-    census = pool_report.counts_blob(plain)
-    assert blob["counts"] == census["counts"] and blob["counts"], (blob["counts"], census["counts"])
-    assert {g: int(w) for g, w in blob["widths"].items()} == census["widths"]
+    census = plain.merged_census()                   # {group: {table width in ops: how many}}
+    counts = {g: sum(hist.values()) for g, hist in census.items()}
+    assert blob["counts"] == counts and blob["counts"], (blob["counts"], counts)
+    assert {g: int(w) for g, w in blob["widths"].items()} == {g: max(hist) for g, hist in census.items()}
 
 
 @pytest.mark.parametrize("flag", [["--counts-trust"], ["--preflight-only"]])

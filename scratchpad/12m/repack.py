@@ -25,8 +25,7 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, "C:/Users/tomhe/Documents/flipjump-151")
-from flipjump.fjm.fjm_consts import LZMA_DECOMPRESSION_FILTERS, LZMA_FORMAT  # noqa: E402
+from flipjump.fjm.fjm_consts import LZMA_DECOMPRESSION_FILTERS, LZMA_FORMAT
 
 HEADER = 64          # magic+version header, extension, one segment record -- verified on P7B
 FILTERS_9E = [{"id": lzma.FILTER_LZMA2, "preset": 9 | lzma.PRESET_EXTREME}]

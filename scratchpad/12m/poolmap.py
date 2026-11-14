@@ -9,45 +9,44 @@ its preflight runs inside the patched `fj.assemble`, so reaching it costs the ti
 already on disk: the .fjm's own segment table, and the frozen counts cache that
 `docs/ship-gate.md` 1b's build command names.
 
-THE POOL'S ARITHMETIC, from flipjump-151 `flipjump/assembler/preprocessor.py`:
+THE POOL'S ARITHMETIC, from flipjump's `flipjump/assembler/inner_classes/table_pool.py`:
 
-  * there are no gaps BETWEEN blocks. `BlockPool._preallocate` allocates biggest-first with each
-    block aligned to its own power-of-two size; its docstring says allocating them in "encounter
-    order leaves a hole in front of each one, up to a whole block's worth", while "in descending
-    size each block lands on an address the previous ones already aligned past". The measurement
-    that shows it is
+  * there are no gaps BETWEEN blocks. `BlockPool.lay_out_blocks` places them biggest-first, each
+    aligned to its own power-of-two size: in encounter order a hole would sit in front of each
+    one, up to a whole block's worth, while in descending size each block lands on an address the
+    previous ones already aligned past. The measurement that shows it is
     `demand == extent`: the block SIZES sum to the span the blocks occupy, so no block sits behind
     a hole. (`extent == the image's span above pool_base` is a DIFFERENT fact -- it says the image
-    ends at the allocator's cursor -- and it cannot prove this one, because `_used` is the cursor
-    and so already contains any hole.)
+    ends at the allocator's cursor -- and it cannot prove this one, because the cursor already
+    contains any hole.)
   * the padding is INSIDE the blocks, by three mechanisms, which `pad_breakdown` separates and the
     PAD line prints:
       - the whole block is rounded up to a power of two AFTER its buckets are laid out
-        (`_bucket_layout`: `1 << max(0, (offset - 1).bit_length())`) -- a `--width-buckets` one; the
-        uniform path's block IS its slots, so this term is 0 there;
+        (`BlockPool._sub_blocks`); a block of ONE bucket is a power of two already, so this term
+        is 0 for it;
       - slots past the group's table count are never written: the count is rounded up to a power
-        of two, times `--spread` for a group above `--spread-min-count`. `__init__`'s own note:
-        "unused slots emit no data, so it costs span, not data";
-      - every slot is as wide as its bucket's widest table (`_bucket_layout`: "most of a mixed
-        group's block is width padding"), and a table wider than `--max-slot-ops` is declined to
-        inline and emits nothing into the pool at all.
+        of two, times `--spread` for a group above `--spread-min-count`. Unused slots emit no
+        data, so this costs span, not data;
+      - every slot is a power of two wide, the first that holds its table (`BlockPool.slot_ops`),
+        and a table wider than `--max-slot-ops` is declined to inline and emits nothing into the
+        pool at all.
     A fourth term, alignment BETWEEN buckets, is printed and is 0 for every group, at any
     `--spread`: a bucket is `spread * op_bits * 2**k` bits, so of two buckets in one group the
     bigger is a whole multiple of the smaller (the `spread` cancels), and laying them out
     biggest-first therefore always leaves the cursor aligned for the next. That is a property of
-    `_bucket_layout`, not of this binary, so the term is MEASURED and printed rather than assumed:
+    `_sub_blocks`, not of this binary, so the term is MEASURED and printed rather than assumed:
     a layout whose bucket size was not a power of two times the group's spread would print it
     nonzero instead of quietly landing in one of the other three terms.
 
-  sum(BlockPool._block_bits) - (words the .fjm actually emits into the pool) = that padding.
+  the blocks' bits (`pool_report.demand_bits`) - (words the .fjm actually emits into the pool) = that padding.
 
     python scratchpad/12m/poolmap.py
     python scratchpad/12m/poolmap.py --allow-stale      # counts cache signed for another tree
     python scratchpad/12m/poolmap.py --selftest
 
-The knobs default to ship-gate 1b's build command. Only those that enter `_block_bits` /
-`_preallocate` change these numbers: `--pool-base`, `--span-bits`, `--spread`,
-`--spread-min-count`, `--max-slot-ops`, `--width-buckets`, the cache's alias map and `--heat`.
+The knobs default to ship-gate 1b's build command. Only those that enter the layout
+change these numbers: `--pool-base`, `--span-bits`, `--spread`, `--spread-min-count`,
+`--max-slot-ops` and `--heat`.
 `--pin-broken` / `--pin-state-cells` decide PINNING, not placement, so they are not repeated here.
 
 A HEAT BUILD (`build_blocked.py --pin-heat`, M7 P1.1; `--heat` here, the 1b list by default,
@@ -62,7 +61,7 @@ CONTROLS (R9)
      reported as ITS numbers. A reader that printed blocked25's constants would pass every run.
   C2 THE DEMAND READS THE COUNTS -- dropping one group's table count in a copy of the frozen counts
      must move the demand by exactly that group's block size, before minus after. A demand that
-     ignored the cache, or a stubbed `_block_bits`, does not move at all.
+     ignored the cache, or a stubbed block size, does not move at all.
   C3 A STALE CACHE IS REFUSED -- the counts are keyed by the emitter sources (`build_blocked.py`'s
      `_counts_sig`); a cache whose signature does not match the working tree must be reported STALE
      rather than priced, since its block sizes belong to a different program.
@@ -72,10 +71,10 @@ CONTROLS (R9)
      group; priced without it, the same groups do not. A --heat that was parsed and then dropped
      on the way to the pool passes neither half. (Skipped, and said so, under --no-heat.)
   C5 THE PAD'S MECHANISMS ARE MEASURED, NOT APPORTIONED -- a hand-computed two-bucket block whose
-     round-up, alignment, unused-slot and width terms are each known in advance; the same group
-     with `--no-width-buckets`, where the round-up term must vanish (so the term names a mechanism
+     round-up, alignment, unused-slot and width terms are each known in advance; a one-bucket
+     group, where the round-up term must vanish (so the term names a mechanism
      rather than being a constant); and, on the real cache, that the breakdown's own total IS the
-     demand the PAD line prices, which is what stops it drifting from `_block_bits`. A breakdown
+     demand the PAD line prices, which is what stops it drifting from the blocks' sizes. A breakdown
      that charged the whole pad to unused slots -- what the PAD line claimed before 2026-09-15 --
      reports (2048, 0, 0, 0, 2048) for the hand-computed block, and 84,565,984 words of demand
      against the PAD line's 45,678,048.
@@ -146,9 +145,9 @@ def placed_first(pool, groups):
 def pad_breakdown(pool, width_hist):
     """the block bits, in the four nested totals the PAD line differences -- all in BITS.
 
-    Each follows exactly what `_block_bits` charges, so the mechanisms cannot drift from the sizes:
+    Each follows exactly what the pool's blocks charge, so the mechanisms cannot drift from the sizes:
 
-      demand    what the allocator hands out: `_block_bits` per group
+      demand    what the allocator hands out: each group's block, in bits
       top       the highest bit any bucket's slots reach inside its block
       slots     what the slots themselves cover
       occupied  the slot each COUNTED table sits in
@@ -163,7 +162,7 @@ def pad_breakdown(pool, width_hist):
         layout = pool_report.sub_blocks(pool, group)
         tables = pool_report.slot_counts(pool, widths)
         totals["demand"] += pool_report.block_bits(pool, group)
-        totals["top"] += max(off + n * so * ob for so, (off, n) in layout.items())
+        totals["top"] += max((off + n * so * ob for so, (off, n) in layout.items()), default=0)
         totals["slots"] += sum(n * so * ob for so, (_off, n) in layout.items())
         totals["occupied"] += sum(tables[so] * so * ob for so in layout)
     return totals
@@ -295,7 +294,7 @@ def report(fjm_path, cache_path, knobs):
     print("PAD    %s - %s = %s words INSIDE the blocks, by mechanism:"
           % (format(demand, ","), format(pool_words, ","), format(pad, ",")), flush=True)
     t = pad_breakdown(pool, cache["width_hist"])
-    terms = (("block power-of-two round-up", t["demand"] - t["top"], "--width-buckets only"),
+    terms = (("block power-of-two round-up", t["demand"] - t["top"], "a block of several buckets"),
              ("alignment between buckets", t["top"] - t["slots"], "structurally 0"),
              ("unused slots", t["slots"] - t["occupied"], "count rounded up, times --spread"),
              ("slot width + declined tables", t["occupied"] - pool_words * W, ""))
@@ -465,6 +464,16 @@ def selftest(fjm_path, cache_path, knobs):
            b["slots"] - b["occupied"], b["occupied"])
     check("C5 the hand-computed block breaks down as (1024, 256, 0, 64, 704) bits",
           got == (1024, 256, 0, 64, 704), "got %s" % (got,))
+    #     The same three 1-op tables alone are ONE bucket: 4 slots, 256 bits, a power of two already, so the
+    #     round-up term must vanish (it names a mechanism, it is not a constant).
+    one = pad_breakdown(probe_pool(32, {"g": 3}, {"g": 1}, {"g": {1: 3}}, {}, synth), {"g": {1: 3}})
+    got = (one["demand"], one["demand"] - one["top"])
+    check("C5 a one-bucket block has no round-up: (256, 0) bits", got == (256, 0), "got %s" % (got,))
+    #     A group whose tables are all wider than the slot limit has an EMPTY block: every term is 0.
+    wide = dict(synth, max_slot_ops=4)
+    none = pad_breakdown(probe_pool(32, {"g": 2}, {"g": 5}, {"g": {5: 2}}, {}, wide), {"g": {5: 2}})
+    check("C5 a group with no movable table breaks down as all zeros",
+          none == dict(demand=0, top=0, slots=0, occupied=0), "got %s" % (none,))
 
     print("", flush=True)
     print("SELFTEST %s%s" % ("PASS" if not fails else "FAIL",

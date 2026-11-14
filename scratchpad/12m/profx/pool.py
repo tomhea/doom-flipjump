@@ -1,8 +1,8 @@
 """The block pool of a blocked build, as the assembler laid it out, and its source words.
 
-GROUPS. flipjump-151's BlockPool (flipjump/assembler/preprocessor.py) groups tables by the
+GROUPS. flipjump's BlockPool (flipjump/assembler/inner_classes/table_pool.py) groups tables by the
 EXPRESSION of the word they dispatch through (`str(src + w)`, e.g. "(hex.tables.res + 32)"); the
-word is the source cell's JUMP word. `reconstruct()` re-runs BlockPool._preallocate from the frozen
+word is the source cell's JUMP word. `reconstruct()` re-runs the pool's layout (`pool_report.lay_out`) from the frozen
 counts cache and the build's knobs -- deterministic, which is what lets a build's two assemblies
 agree -- so every group's block base and size are known without re-assembling. `eval_key()`
 resolves a group expression against a label table (bit addresses). A PINNED word rests at
@@ -22,7 +22,7 @@ if SRC not in sys.path:
 from doomfj import pool_report  # noqa: E402
 
 W = 32
-# ship-gate 1b's knobs (docs/ship-gate.md): the ones that enter _block_bits / _preallocate
+# ship-gate 1b's knobs (docs/ship-gate.md): the ones that enter the layout
 KNOBS = {"pool_base": 0x80000000, "span_bits": 0x7fffffe0,   # M7 P8a (was 0x60000000; poolmap.SHIP_GATE)
           "spread": 2, "spread_min_count": 256,
          "max_slot_ops": 512, "width_buckets": True}

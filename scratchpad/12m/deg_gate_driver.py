@@ -81,14 +81,14 @@ def verdict(status, pool, *, restricted=False):
     if pool is None:                    # the --off baseline: no pass to be vacuous about
         return status
     stats = pool_report.stats(pool)
-    if stats["in_blocks"] == 0:
+    if stats["moved"] == 0:
         return _vacuous(status, restricted,
                         "the pool relocated NOTHING (0 allocated, %s declined) -- this run is the "
                         "stock program, whatever the gate said" % format(stats["declined"], ","))
     if not pool.pinned:
         return _vacuous(status, restricted,
-                        "%s tables were blocked but NO word was pinned -- the arm still writes an "
-                        "address, so this is placement, not blocking" % format(stats["in_blocks"], ","))
+                        "%s tables were moved but NO word was pinned -- the arm still writes an "
+                        "address, so this is placement, not blocking" % format(stats["moved"], ","))
     return status
 
 

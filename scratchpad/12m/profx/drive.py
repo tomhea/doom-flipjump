@@ -93,7 +93,8 @@ def run(pos, opt):
         sys.path.insert(0, str(q))
     import gamespeed as GS                                                    # noqa: E402
     import m2_std_gate as gate                                                # noqa: E402
-    from doomfj.fastrun import FjmRunner, _fjcore                             # noqa: E402
+    from doomfj.fastrun import FjmRunner                                      # noqa: E402
+    from flipjump.interpreter import _fjcore                              # noqa: E402 (the extension itself: its binary's path, and prof_*)
     from flipjump.interpreter.io_devices.KeyboardIO import ScriptedKeyEventSource  # noqa: E402
     from flipjump.interpreter.io_devices.device_memory import NativeDeviceMemory  # noqa: E402
     from flipjump.interpreter.io_devices.pygame_window import PcIO           # noqa: E402

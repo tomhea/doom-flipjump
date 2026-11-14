@@ -40,7 +40,8 @@ spec = importlib.util.spec_from_file_location("flipjump.interpreter._fjcore", py
 mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
 sys.modules["flipjump.interpreter._fjcore"] = mod
 import gamespeed as GS, m2_std_gate as gate
-from doomfj.fastrun import FjmRunner, _fjcore
+from doomfj.fastrun import FjmRunner
+from flipjump.interpreter import _fjcore  # the extension itself: its binary's path
 assert Path(_fjcore.__file__).resolve() == Path(pyd).resolve(), _fjcore.__file__
 from flipjump.interpreter.io_devices.KeyboardIO import ScriptedKeyEventSource
 from flipjump.interpreter.io_devices.device_memory import NativeDeviceMemory

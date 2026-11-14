@@ -59,13 +59,13 @@ C line compiled into several assembly instructions, each of which compiled into 
 10,000 FlipJump ops. <!-- VERIFY: the 100 to 10,000 range -->
 
 I did make the interpreter much faster while developing fjdoom, and reached 200M FlipJump ops per
-second on my laptop. <!-- the shipped record (blocked63): 232.6M on one pinned core, blocked63_msframe_freeze.log --> But that
+second on my laptop. <!-- the shipped record (blocked65): 222.8M on one pinned core, blocked65_msframe.log --> But that
 does not change the truth that compiled C cannot be optimized that far.
 
 DOOM had to be written in FlipJump itself. And it would be A LOT of FlipJump lines. And it would
 need EVERY OPTIMIZATION IT COULD GET.
 
-"Written in FlipJump" does not mean typed by hand. The final program is 52 million words; its
+"Written in FlipJump" does not mean typed by hand. The final program is 50 million words; its
 FlipJump source is millions of lines. <!-- VERIFY: 2.8M lines on the previous build; re-count for
 blocked53 --> A Python program I wrote generates it, the way a compiler would: it reads the level
 from the WAD, compiles the BSP tree, textures, sprites and light tables into FlipJump data and
@@ -198,23 +198,24 @@ Finally came moving monsters, damage taken from monsters, shooting at monsters w
 keys, up to a rocket launcher, dying, a health and ammo bar, a main menu, a help page and a map. With Claude finding more optimizations along the way, the
 shipped game measures:
 
-* Binary size: 39.8 MB (52.3M 32-bit memory words, compressed)
-* Mean FlipJump ops per frame: 16.1M on the benchmark tours, 14.2M in the frozen combat scenarios <!-- blocked62: gamespeed mean 16,076,977, (mean+p80)/2 16,837,730; v10 combat mean 14,193,897 -->
-* Screen: 160x100, about 15 fps (68 ms per frame on one pinned core, 233M flip-jumps per second)
+* Binary size: 17.6 MB (50.2M 32-bit memory words, compressed)
+* Mean FlipJump ops per frame: 14.1M on the benchmark tours, 12.5M in the frozen combat scenarios <!-- blocked65: gamespeed mean 14,124,839, (mean+p80)/2 14,792,784 (blocked65_gamespeed.log); v10 combat mean 12,520,028 (blocked65_b0_v10.log) -->
+* Screen: 160x100, about 16 fps (63 ms per frame on one pinned core, 223M flip-jumps per second)
 
 ![Where a frame's flip-jumps go, and what the 52M-word program is made of](media/blocked62_pies.png)
 
 *Left: the 16.1M flip-jumps of a mean frame of the benchmark tours. Walls take 60%, sprites 24%,
 floors and ceilings 6%, the BSP walk 5.5%; all the game logic, the status bar and the menus together
 are 1.6%. Right: the 52.1M-word program. Lookup tables are 41% of it, which is the whole trick:
-arithmetic is read, not computed. Measured on blocked62 (M7 P13).*
+arithmetic is read, not computed. Measured on blocked62 (M7 P13); the shipped blocked65 is the same game on
+flipjump 1.6.0's library, 12.6% fewer flip-jumps a frame, not re-profiled.*
 
 ### Thanks
 
 I am genuinely grateful for the AI's help here. I know it is not common to thank these kinds of
 tools, especially for advances in theoretical subjects. I believe I could have done every part of
 it myself, but it would have taken a few years, and so I probably would never have gotten to it.
-With these tools (and about 25B tokens <!-- VERIFY -->) and about four months, I turned this dream
+With these tools (and about 25B tokens <!-- VERIFY -->) and about five months, I turned this dream
 into reality.
 
 ### Perspective
@@ -231,12 +232,14 @@ about 25 to 30 frames per second. That is on the order of two million instructio
 thirty instructions for every one of the 64,000 pixels at 320x200. And each of those instructions
 is a real instruction: one of them adds two 32-bit numbers.
 
-fjdoom spends about 900 flip-jumps per pixel in a fight (14.2 million a frame over 16,000 pixels).
-Adding two 32-bit numbers costs about 800 of them.
+fjdoom spends about 800 flip-jumps per pixel in a fight (12.5 million a frame over 16,000 pixels).
+Adding two 32-bit numbers costs about 340 of them, with the tables placed the way the game places
+them (about 550 anywhere else). The 800 earlier in this story was my estimate at the start; this is
+measured on today's library. <!-- docs/ship-evidence/add_cost_160.log, scratchpad/12m/add_cost.py -->
 
 Read that again. Every textured, shaded, perspective-correct pixel on the screen is drawn for about
-the price of one addition. The whole frame, monsters, fireballs and all, costs about as much
-flipping as eighteen thousand additions. id Software had two million instructions to spend on the
+the price of two additions. The whole frame, monsters, fireballs and all, costs about as much
+flipping as thirty-seven thousand additions. id Software had two million instructions to spend on the
 same job.
 
 How is that even possible? Because almost nothing is computed; it is looked up. The level's BSP
@@ -247,7 +250,7 @@ a pixel; it jumps there.
 (The 486 figures are enthusiasts' timedemo measurements, and Dhrystone MIPS flatters a chip that
 spends much of a DOOM frame waiting on memory. Both errors make the 486 look busier than it was,
 so the real gap is smaller than the arithmetic says. The point survives: thirty instructions per
-pixel against one addition's worth of flips.)
+pixel against two additions' worth of flips.)
 
 That is the power of getting to know the bits and bytes of an architecture, and understanding how
 to use it best.
@@ -265,8 +268,7 @@ curl -LO https://github.com/tomhea/doom-flipjump/releases/latest/download/doom.f
 fj --run doom.fjm
 ```
 
-Also possible, with nothing to install: `uvx fjdoom`. (Until the 1.0 release is out none of these
-lines works yet: flipjump 1.6.0 is not on PyPI, the release file does not exist and the `fjdoom`
-package is not published; see docs/developing.md to build it.) The code is at
+(These lines work once the 1.0 release is published; until then, docs/developing.md says how to
+build it.) The code is at
 https://github.com/tomhea/doom-flipjump, and the numbers, each with the command that produced it,
 are in [ship-gate.md](ship-gate.md).

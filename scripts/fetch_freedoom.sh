@@ -36,7 +36,7 @@ check() {    # check <file> <expected sha256>
 
 mkdir -p "$DEST_DIR"
 echo "Fetching Freedoom ${VER} -> ${DEST_DIR}/"
-curl -fSL "$URL" -o "${DEST_DIR}/${ZIP}"
+curl -fSL --retry 5 --retry-delay 10 --retry-all-errors "$URL" -o "${DEST_DIR}/${ZIP}"   # a 5xx from GitHub is transient
 cd "$DEST_DIR"
 if [ "$VER" = "$PINNED_VER" ]; then
     check "$ZIP" "$ZIP_SHA256"

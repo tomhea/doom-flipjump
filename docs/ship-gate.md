@@ -24,6 +24,7 @@ identical too (`blocked65_rebuild.log`). Its gates, each solo (`docs/ship-eviden
 | combat set v10 | (mean+p80)/2 = **14,249,841** (blocked64 16,297,393, **-12.56%**); every run state 100/100, pixels 100/100; B0 OK |
 | binding metric | **14,792,784 ops/frame -- PASS** against 22,000,000 (blocked64 16,921,550, **-12.58%**); `gamespeed_trail` PASS (`--validate`'s record equals the binary on every frame of every run) |
 | menu / key tests | key_latch, keyboard_input, menu_screens, skill_menu: 150 passed (`blocked65_menu_tests.log`) |
+| a 32-bit addition (`hex.add 8`, the README's row) | **339.6 / 339.7 / 341.5 flip-jumps** with `--pool-tables` (its tables placed as the game's are), 546.5 / 546.5 / 548.4 as assembled; 200 additions x 3 seeds, the sum control PASS; flipjump b1365b5, 2026-11-10 (`scratchpad/12m/add_cost.py`, `add_cost_160.log`) |
 | size | **37.40% of 2^27 -- PASS** against 43% (50,198,748 words; file 17,606,504 bytes, .fjm v4); the pool 74.0% of its window, 44,739 of 44,739 groups placed, 20 of 20 hot words pinned, 0 lost |
 | **ms/frame** | **63.4 ms/frame against blocked64's 68.3 -- B FASTER x1.076** (all five pairs, 1.066 .. 1.104; pixels identical; both on 1.6.0 e44ff3f, `blocked65_msframe.log`); 222.8 M fj/s, 14,126,543 ops/frame on msframe's script. The `shipped` baseline is re-frozen on blocked65: **63.6 ms/frame** (`blocked65_msframe_freeze.log`) |
 
@@ -1391,3 +1392,6 @@ no other level has the allowance (`test_e1m6_over_cap_passes_up_to_its_record_on
 op fails, the same logs judged as E1M7 fail). The re-run (`--out-dir build/episode_final`, the same source: only the
 two failed steps ran, 804 s + 936 s) reproduced both numbers to the op and ended EPISODE: PASS
 (`episode_final_E1M6_b0.log`, `episode_final_E1M6_gamespeed.log`).
+
+**The owner, 2026-11-05: "i allow E1M6 to be over the 22M cap on its combat set."** E1M6 ships with its B0 at
+25,737,929 and its tours at 25,479,320; the creator's allowance stays bounded by those two numbers (one op more fails).

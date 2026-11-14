@@ -11,7 +11,7 @@
   <a href="https://github.com/tomhea/doom-flipjump/actions/workflows/ci.yml"><img src="https://github.com/tomhea/doom-flipjump/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/tomhea/doom-flipjump" alt="License: BSD-2-Clause"></a>
   <a href="https://pypi.org/project/flipjump/"><img src="https://img.shields.io/pypi/v/flipjump?label=flipjump" alt="flipjump on PyPI"></a>
-  <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11 or newer">
+  <img src="https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14%20%7C%203.15-blue" alt="Python 3.11 to 3.15">
   <a href="https://esolangs.org/wiki/FlipJump"><img src="https://img.shields.io/badge/FlipJump-one%20instruction-black" alt="FlipJump: one instruction"></a>
   <a href="https://github.com/tomhea/doom-flipjump/stargazers"><img src="https://img.shields.io/github/stars/tomhea/doom-flipjump?style=social" alt="GitHub stars"></a>
 </p>
@@ -66,7 +66,7 @@ Also possible, with nothing to install: `uvx fjdoom`.
 The `fjdoom` package is not published yet, so that line does not work yet.
 [docs/developing.md](docs/developing.md) says how to build the game yourself.
 
-- Needs Python 3.11 or newer, a display, and about 1 GB of free RAM. Prebuilt interpreter wheels
+- Needs Python 3.11 to 3.15, a display, and about 1 GB of free RAM. Prebuilt interpreter wheels
   exist for Windows, macOS (Intel and Apple silicon) and Linux (x86-64 and ARM).
   <!-- TODO: measure cold start time and the download size; state both here. -->
 - Windows PowerShell 5 aliases `curl` to its own command: type `curl.exe` there, or save the file

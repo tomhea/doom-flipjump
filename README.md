@@ -61,9 +61,6 @@ Three lines: the FlipJump interpreter, the game (one file), and a window with th
 per level, run the same way. The file carries its own run settings (the screen device and the flat memory
 flag are in its header), so there is nothing else to type.
 
-Also possible, with nothing to install: `uvx fjdoom`.
-
-The `fjdoom` package is not published yet, so that line does not work yet.
 [docs/developing.md](docs/developing.md) says how to build the game yourself.
 
 - Needs Python 3.11 to 3.15, a display, and about 1 GB of free RAM. Prebuilt interpreter wheels
@@ -172,11 +169,11 @@ header) that shows whatever the program writes to it. The same `.fjm` runs, slow
 **Is this the real DOOM?** It is a DOOM engine: the BSP renderer, the WAD format and the game rules
 re-implemented from the published sources. The level and the art are
 [Freedoom](https://freedoom.github.io/)'s (BSD-licensed), because id Software's assets cannot be
-redistributed. What you play is Freedoom Phase 1's first episode, E1M1 to E1M9, not id's. The compiler takes any
-DOOM-format WAD as input. <!-- TODO: either test a build from doom1.wad before launch and describe it here, or delete this sentence. -->
+redistributed. What you play is Freedoom Phase 1's first episode, E1M1 to E1M9, not id's. The compiler reads the
+standard DOOM WAD format; only Freedoom's levels have been built and tested.
 
 **How was it built?** <!-- TODO owner: this is the paragraph HN reads first; edit it in your own words. -->
-Over four months, June to October 2026, with Claude Code (Anthropic's coding agent) writing most of
+Over five months, June to November 2026, with Claude Code (Anthropic's coding agent) writing most of
 the implementation. The language, its interpreter, the architecture, the goals and every decision
 are the author's. The process was designed so that nothing rests on trust: an independent Python
 oracle, byte-exact gates with instruction counts to the digit, a written review contract for every
@@ -207,7 +204,7 @@ arithmetic set the terms: about 200 million flip-jumps per second and, by my est
 addition, so a 320x200 frame at 25 fps would leave 125 flip-jumps per pixel, a sixth of an addition.
 The screen became 160x100 and the target 13 frames a second.
 
-The first frame cost a billion flip-jumps. Four months of lookup tables, a BSP tree compiled into
+The first frame cost a billion flip-jumps. Five months of lookup tables, a BSP tree compiled into
 code, a program that resets itself every frame, and a Python oracle that every frame had to match
 byte for byte brought a frame with monsters down to about fourteen million. The long version, with
 the numbers, the dead ends and what Claude did and did not do: **[docs/story.md](docs/story.md)**.

@@ -215,7 +215,7 @@ flipjump 1.6.0's library, 12.6% fewer flip-jumps a frame, not re-profiled.*
 I am genuinely grateful for the AI's help here. I know it is not common to thank these kinds of
 tools, especially for advances in theoretical subjects. I believe I could have done every part of
 it myself, but it would have taken a few years, and so I probably would never have gotten to it.
-With these tools (and about 25B tokens <!-- VERIFY -->) and about four months, I turned this dream
+With these tools (and about 25B tokens <!-- VERIFY -->) and about five months, I turned this dream
 into reality.
 
 ### Perspective
@@ -268,8 +268,7 @@ curl -LO https://github.com/tomhea/doom-flipjump/releases/latest/download/doom.f
 fj --run doom.fjm
 ```
 
-Also possible, with nothing to install: `uvx fjdoom`. (Until the 1.0 release is out none of these
-lines works yet: flipjump 1.6.0 is not on PyPI, the release file does not exist and the `fjdoom`
-package is not published; see docs/developing.md to build it.) The code is at
+(These lines work once the 1.0 release is published; until then, docs/developing.md says how to
+build it.) The code is at
 https://github.com/tomhea/doom-flipjump, and the numbers, each with the command that produced it,
 are in [ship-gate.md](ship-gate.md).

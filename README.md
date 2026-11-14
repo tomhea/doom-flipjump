@@ -20,9 +20,9 @@ FlipJump's only instruction is `a;b`: **flip** the bit at address `a`, then **ju
 No registers, no arithmetic, no conditional branch, no load or store. Everything else, including
 "if", is built by flipping bits inside the address of the next jump.
 
-This repository builds a 52-million-word FlipJump program that renders Freedoom's first level with
+This repository builds a 50-million-word FlipJump program that renders Freedoom's first level with
 textured walls, floors and ceilings, doors and lifts, monsters that hunt and fight back, six
-weapons on five keys up to a rocket launcher, damage, death, a menu and an automap, at 160x100, around 15 frames a second on the native FlipJump
+weapons on five keys up to a rocket launcher, damage, death, a menu and an automap, at 160x100, around 16 frames a second on the native FlipJump
 interpreter. All nine levels of the first episode are built the same way, one program per level.
 
 <p align="center">
@@ -31,7 +31,7 @@ interpreter. All nine levels of the first episode are built the same way, one pr
   <img src="docs/media/imp_fireball.png" width="32%" alt="An imp's fireball, point blank">
 </p>
 <p align="center"><sub>Every picture on this page was rendered by the project's Python oracle replaying a frozen combat
-scenario. The shipped binary draws byte-identical frames on every frame of those runs (the B0 gate on the frozen v10 set, 2026-10-18,
+scenario. The shipped binary draws byte-identical frames on every frame of those runs (the B0 gate on the frozen v10 set, 2026-10-28,
 <a href="docs/ship-gate.md">ship-gate.md</a>).</sub></p>
 
 <details>
@@ -57,7 +57,7 @@ fj --run doom.fjm
 ```
 
 Three lines: the FlipJump interpreter, the game (one file), and a window with the menu. Press
-**Enter** on NEW GAME. That is E1M1; the release also has `doom_e1m2.fjm` to `doom_e1m9.fjm`, one file
+**Enter** on NEW GAME, pick a skill, and press Enter again. That is E1M1; the release also has `doom_e1m2.fjm` to `doom_e1m9.fjm`, one file
 per level, run the same way. The file carries its own run settings (the screen device and the flat memory
 flag are in its header), so there is nothing else to type.
 
@@ -87,7 +87,7 @@ The `fjdoom` package is not published yet, so that line does not work yet.
 | left / right arrows | turn |
 | A / D, or , / . | strafe |
 | Ctrl | fire |
-| 1 2 3 4 5 | weapons (1 is the fist or the chainsaw, 5 the rocket launcher) |
+| 1 2 3 4 5 | weapons (1 is the fist or the chainsaw, 5 the rocket launcher; E1M6 and E1M9 add 6, the plasma rifle) |
 | Space or E | use (opens doors) |
 | H | help screen |
 | M | the map |
@@ -107,10 +107,10 @@ for (;;) {
     ip = mem[ip + 1];                   /* jump                          */
 }
 ```
-<!-- TODO: link to the literal loop at the 1.6.0 tag (_fjcore.c, the `for (;;)` at ~line 1089). -->
+<!-- TODO: link to the literal loop at the 1.6.0 tag (_fjcore.c, the `for (;;)` at line 1112 at b1365b5). -->
 
 The screen is a memory-mapped output device and the keyboard a memory-mapped input device. Nothing
-else runs: no Python, no C game logic, no hidden renderer. The interpreter is open and about two
+else runs: no game code in Python or C, no hidden renderer. The interpreter is open and about two
 thousand lines; the loop above is all it does per op.
 
 **Python wrote the program; it does not run it.** The toolchain in `src/doomfj/` is a compiler. It
@@ -135,7 +135,7 @@ to its start.
 **Every pixel is cross-checked.** A Python reference model, `src/doomfj/reference_model.py`,
 simulates and renders the same frame independently. The FlipJump build must match it **byte for
 byte**, with instruction counts equal to the digit, on frozen scenario sets, before it ships. No
-number below rests on anyone's word; each row names the command that produced it.
+number below rests on anyone's word; each is recorded next to the command that produced it.
 
 ## The numbers
 
@@ -184,7 +184,7 @@ change ([docs/cr-rules.md](docs/cr-rules.md)), and a rule that any measurement q
 with a negative control. The whole record, including every per-milestone handoff, is in `docs/`.
 
 **Why 160x100 and 16 fps?** Cost is counted in flip-jumps and a frame is 12 to 15 million of them,
-at 223 million per second on one core. DOOM's native width is 320; 160 halves the per-frame work and
+at 223 million per second on one core. DOOM's native screen is 320x200; 160x100 is a quarter of the pixels and
 is what fits a 32-bit address space (2^32 bits of memory, 2^27 words of 32 bits) with room for the game. What was tried, kept and closed
 on the way is in [docs/ship-gate.md](docs/ship-gate.md).
 
@@ -203,13 +203,13 @@ frame would have taken seconds. I shelved the dream.
 
 In June 2026 two things happened in the same week. A friend gave a talk about running DOOM on his
 water dispenser, and I started using a coding agent. Months suddenly looked possible. The
-arithmetic set the terms: about 200 million flip-jumps per second, 800 of them for one 32-bit
+arithmetic set the terms: about 200 million flip-jumps per second and, by my estimate then, 800 of them for one 32-bit
 addition, so a 320x200 frame at 25 fps would leave 125 flip-jumps per pixel, a sixth of an addition.
 The screen became 160x100 and the target 13 frames a second.
 
 The first frame cost a billion flip-jumps. Four months of lookup tables, a BSP tree compiled into
 code, a program that resets itself every frame, and a Python oracle that every frame had to match
-byte for byte brought a frame with monsters down to about sixteen million. The long version, with
+byte for byte brought a frame with monsters down to about fourteen million. The long version, with
 the numbers, the dead ends and what Claude did and did not do: **[docs/story.md](docs/story.md)**.
 
 ## How it works, in one screen

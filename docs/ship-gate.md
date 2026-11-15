@@ -1395,3 +1395,80 @@ two failed steps ran, 804 s + 936 s) reproduced both numbers to the op and ended
 
 **The owner, 2026-11-05: "i allow E1M6 to be over the 22M cap on its combat set."** E1M6 ships with its B0 at
 25,737,929 and its tours at 25,479,320; the creator's allowance stays bounded by those two numbers (one op more fails).
+
+## 15. The shipped build timed, and the README's chart measured on it (2026-11-15)
+
+fjdoom main at `942f8713` (#177) with flipjump `7a49ef1` (branch `1.6.0`), on the box of sections 12-14 (15.6 GB of
+RAM). The README's build time, build RAM and its two charts are this section's numbers;
+`tests/host/test_readme_numbers.py` holds the README, `docs/story.md` and `docs/developing.md` to the two files they
+come from (`blocked65_pies_classified.json`, `blocked65_remeasure_build.log`).
+
+**The build.** Section 1b's line into `build/pies65/` with an empty counts cache, under `scratchpad/12m/rss_run.py`
+(it samples the memory of the build's whole process tree):
+
+```
+python scripts/heavy.py pies65-build --build --log build.log -- python scratchpad/12m/rss_run.py build_rss.json -- python scratchpad/12m/build_labeled.py --labels build/pies65/doom_e1m1.labels.tsv.gz -- game --out build/pies65/doom_e1m1.fjm --pool-base 0x80000000 --span-bits 0x7fffffe0 --pin-state-cells --merge-aliases --spread 2 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --one-pass-blocks --counts-cache build/pies65/census_e1m1.json.gz --pin-heat scratchpad/12m/heat_e1m1_adopt.json.gz
+cat build/pies65/generated_doom_e1m1/*.fj | wc -lc
+```
+
+| | |
+|---|---|
+| the binary | BYTE-IDENTICAL to blocked65, sha256 `3a2c9564adbfcb07a1378b6c0045ca2291246c4100abcafad68bae4af3815d3b` |
+| wall time | **783 s** (13 min 3 s); the build's own `total 781s`, of it the assembly 400 s |
+| peak memory of the process tree | **6.09 GB** private, 6.03 GB resident (1,545 samples); the kernel's peak for the root process: 6.22 GB working set |
+| the generated source | 3,003,454 lines, 67.8 MB, in nine files (the standard library not counted) |
+
+Evidence: `docs/ship-evidence/blocked65_remeasure_build.log` (its last line is `rss_run.py`'s record). Not covered:
+one run, on one box; the other eight levels were rebuilt byte-identical the same day (9 to 25 minutes each) without the
+memory sampler. The record's own build of blocked65 (`blocked65_build.log`, flipjump `9877f25`) took 1709 s, its
+assembly 969 s.
+
+**The chart** (`docs/media/blocked65_pies.png`). The profile is gamespeed's ten games and its calibration run on the
+FJPROFX engine; `scratchpad/12m/pies/` turns it into the picture:
+
+```
+cd scratchpad/12m/profx        # PROFX_WORK=<work dir>, PROFX_FJM / PROFX_LABELS_TSV = the build above
+python profx.py engine
+python maps.py --labels <labels.tsv.gz> --gen-dir build/pies65/generated_doom_e1m1
+python -u drive.py games games65
+python -u drive.py still 0 cal65
+cd ../pies
+python classify.py <labels.tsv.gz> <doom_e1m1.fjm> <generated dir> <work>/games65.incl.bin <work>/cal65.incl.bin classified.json
+python make_pies.py classified.json pies.html
+python make_pies.py --page pies.html page.html
+msedge --headless=new --force-device-scale-factor=3 --window-size=1104,530 --virtual-time-budget=8000 --screenshot=blocked65_pies.png page.html
+python audit_pies.py pies.html classified.json <work>/games65.runs.json <work>/cal65.runs.json <doom_e1m1.fjm>
+python audit_pies.py --selftest pies.html classified.json <work>/games65.runs.json <work>/cal65.runs.json <doom_e1m1.fjm>
+```
+
+| a mean frame's flip-jumps | | | the program's words | | |
+|---|---|---|---|---|---|
+| Walls | 8,766,430 | 62.06% | Lookup tables | 20,905,172 | 41.64% |
+| Sprites | 2,998,828 | 21.23% | Floors and ceilings | 8,181,624 | 16.30% |
+| Floors and ceilings | 933,450 | 6.61% | Collision and positions | 6,445,657 | 12.84% |
+| BSP walk | 841,185 | 5.96% | Game logic | 4,200,806 | 8.37% |
+| Collision and positions | 281,492 | 1.99% | Sprites | 3,904,086 | 7.78% |
+| Game logic | 222,935 | 1.58% | Walls | 3,289,988 | 6.55% |
+| Frame reset | 50,391 | 0.36% | BSP walk | 2,215,267 | 4.41% |
+| Input and move | 14,667 | 0.10% | Status bar and menus | 589,038 | 1.17% |
+| View | 13,688 | 0.10% | View | 290,177 | 0.58% |
+| Status bar and menus | 1,773 | 0.01% | Frame reset | 68,513 | 0.14% |
+| | | | Input and move | 60,191 | 0.12% |
+| | | | Startup | 48,228 | 0.10% |
+| **total** | **14,124,839** | | **total** | **50,198,748** | |
+
+The picture groups game logic with the status bar and menus, and the frame reset with input, view and startup.
+
+| control | result |
+|---|---|
+| the frame total against gamespeed's record | 14,124,839.1 a frame = `blocked65_gamespeed.log`'s `mean run-average: 14,124,839 ops/frame` |
+| the size total against the binary | 50,198,748 = the stored words of the .fjm's segment table, read by flipjump's own reader |
+| `audit_pies.py` (the widget parsed back, every number re-derived) | 112 checks, 0 FAIL (`blocked65_pies_audit.log`) |
+| `audit_pies.py --selftest` (R9) | 5 of 5 mutations CAUGHT: a row value, a percent string, an aria percent, a key's color, a size row (`blocked65_pies_selftest.log`) |
+
+Evidence: `blocked65_pies_profx.log`, `_classify.log`, `_make.log`, `_audit.log`, `_selftest.log`,
+`blocked65_pies_classified.json` (the classifier's output), `blocked65_pies_widget.html` (the widget the audit read).
+Not covered: the audit holds the widget to the classifier's output and the two totals to their own sources; which
+category a word belongs to is the classifier's rule, and no second tool checks it. The picture is a screenshot of the
+widget's page and is not compared with it. The palette validator's colour-blind separation is WARN for three of the
+four colour sequences (a legend names every slice), and its chroma check fails only on the grey of the lookup tables.

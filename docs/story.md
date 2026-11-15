@@ -202,13 +202,12 @@ shipped game measures:
 * Mean FlipJump ops per frame: 14.1M on the benchmark tours, 12.5M in the frozen combat scenarios <!-- blocked65: gamespeed mean 14,124,839, (mean+p80)/2 14,792,784 (blocked65_gamespeed.log); v10 combat mean 12,520,028 (blocked65_b0_v10.log) -->
 * Screen: 160x100, about 16 fps (63 ms per frame on one pinned core, 223M flip-jumps per second)
 
-![Where a frame's flip-jumps go, and what the 52M-word program is made of](media/blocked62_pies.png)
+![Where a frame's flip-jumps go, and what the 50M-word program is made of](media/blocked65_pies.png)
 
-*Left: the 16.1M flip-jumps of a mean frame of the benchmark tours. Walls take 60%, sprites 24%,
-floors and ceilings 6%, the BSP walk 5.5%; all the game logic, the status bar and the menus together
-are 1.6%. Right: the 52.1M-word program. Lookup tables are 41% of it, which is the whole trick:
-arithmetic is read, not computed. Measured on blocked62 (M7 P13); the shipped blocked65 is the same game on
-flipjump 1.6.0's library, 12.6% fewer flip-jumps a frame, not re-profiled.*
+*Left: the 14.1M flip-jumps of a mean frame of the benchmark tours. Walls take 62%, sprites 21%,
+floors and ceilings 6.6%, the BSP walk 6.0%; all the game logic, the status bar and the menus together
+are 1.6%. Right: the 50.2M-word program. Lookup tables are 42% of it, which is the whole trick:
+arithmetic is read, not computed. Measured on the shipped build, blocked65.*
 
 ### Thanks
 

@@ -1,0 +1,7 @@
+totals: game-only ops 14,124,839,107 (per frame 14124839.1), stored words 50,198,748
+a row value off by 1,000           CAUGHT (3 fails, e.g. FAIL ops sums to 14124839 (got 14125839))
+a percent string wrong             CAUGHT (2 fails, e.g. FAIL ops Game logic, status bar and menus percent 9.9%)
+an aria percent wrong              CAUGHT (1 fails, e.g. FAIL ops aria 'Render sprites 99.9' starts 'Render sprites 21.2')
+a key colored differently          CAUGHT (1 fails, e.g. FAIL no two keys share a color)
+a size row value replaced          CAUGHT (14 fails, e.g. FAIL size sums to 50198748 (got 47983482))
+selftest PASS

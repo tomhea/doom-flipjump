@@ -1,0 +1,41 @@
+borders: code_start 17308 tables 65536 hot 1263224 segconsts 6259824 walk 6917442 state 12861578 banks 12998138 sprite bank 13085234 vpb 15619584 vql 18383352 reset 18712610 wflip 18731500..30664760; pool stored 19533988; total stored 50198748
+filler: 10272 words before seg_pass1_leaf -> Walls
+filler: 2400 words before seg_pass1_ts_leaf -> Walls
+filler: 576 words before seg_pass2_leaf -> Walls
+filler: 6208 words before e1m1_bspcode_pos_leaf -> BSP walk
+column renderer: 276883 interval starts by macro {'Walls': 245935, 'Floors and ceilings': 20933, 'Sprites': 10015}; claim scan [4069662, 4073132)
+p5_bar_skip: aim prologue [2965706, 2965904) game logic, palette from 2965904
+seen probe: 76832 words at 4188660 -> Game logic
+wflip area 11933260 words: reached by chains 11933260, unreached 0
+calibration run by category: {'Frame reset': 241757, 'Floors and ceilings': 88690, 'Status bar and menus': 52605, 'Input and move': 7930, 'Lookup tables': 2}
+startup (the runtime words' ops in the calibration run): 2
+shared leaf: 15823677 ops (15823.7/frame) BSP walk -> Collision and positions
+shared leaf: 8549343 ops (8549.3/frame) BSP walk -> View
+shared leaf: 18922561 ops (18922.6/frame) Game logic -> Sprites
+size (words, own + chains):
+  Lookup tables                     20905172 = own   20797828 + chains     107344   41.64%
+  Floors and ceilings                8181624 = own    3252170 + chains    4929454   16.30%
+  Collision and positions            6445657 = own    3657324 + chains    2788333   12.84%
+  Game logic                         4200806 = own    2501060 + chains    1699746    8.37%
+  Sprites                            3904086 = own    3700336 + chains     203750    7.78%
+  Walls                              3289988 = own    2357098 + chains     932890    6.55%
+  BSP walk                           2215267 = own    1143804 + chains    1071463    4.41%
+  Status bar and menus                589038 = own     586658 + chains       2380    1.17%
+  View                                290177 = own     146352 + chains     143825    0.58%
+  Frame reset                          68513 = own      18890 + chains      49623    0.14%
+  Input and move                       60191 = own      55740 + chains       4451    0.12%
+  Startup                              48228 = own      48228 + chains          0    0.10%
+  total 50198748 (stored 50198748)
+ops (owner-attributed, gamespeed's GAME-ONLY frames: 10 games x 100; per frame):
+  Walls                               8766430.4   62.06%
+  Sprites                             2998828.1   21.23%
+  Floors and ceilings                  933449.6    6.61%
+  BSP walk                             841184.5    5.96%
+  Collision and positions              281492.1    1.99%
+  Game logic                           222934.7    1.58%
+  Frame reset                           50391.4    0.36%
+  Input and move                        14667.1    0.10%
+  View                                  13688.0    0.10%
+  Status bar and menus                   1773.3    0.01%
+  Lookup tables                             0.0    0.00%
+  total 14124839.1 per frame

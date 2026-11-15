@@ -37,8 +37,8 @@ output, with a mutant that must fail.
 The exact build line of the shipped binary, its hashes and the gate it passed are in
 [ship-gate.md](ship-gate.md), section 1b. Two warnings before you run it:
 
-- **One heavy build at a time.** The assembler peaks near 10 GB of RAM; two builds at once have
-  killed each other silently.
+- **One heavy build at a time.** The shipped game's build peaks at about 6 GB of RAM; two builds at
+  once have killed each other silently.
 - **It takes a while.** Emission is several minutes, assembly several more, and the blocking pass
   that places the lookup tables needs the counts cache named in the build line.
 

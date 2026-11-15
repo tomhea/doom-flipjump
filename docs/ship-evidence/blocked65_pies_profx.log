@@ -1,0 +1,55 @@
+engine source: working copy C:\Users\tomhe\Documents\flipjump-doompin\flipjump\interpreter\_fjcore.c (sha256 78c29111af7b1ff7..., flipjump 62d93c4)
+built C:\Users\tomhe\AppData\Local\Temp\profx65\engX\_fjcore.pyd (sha256 5434825ac2dc4cba...)
+  marker 23 (ptloc done (write_hex)) not found -- skipped
+  marker 38 (thing_pass alive (thing loaded)) not found -- skipped
+maps -> C:\Users\tomhe\AppData\Local\Temp\profx65: 26 objects, 2595541 label words, 29 markers, reset code ends at word 18731500
+  1     1263224    1298056      34832  input (kb.poll x8 + key decode)
+  2     1298056    1877272     579216  menu
+  3     1877272    2411432     534160  doors (use + 13 door tics)
+  4     2411432    2436080      24648  move sim (turn/move/finesine/mul)
+  5     2436080    2473974      37894  collision (4x vx/vy + dsccs fcall + try_move)
+  6     2473974    2477428       3454  view setup (wnt, wedge_setup)
+  7     2477428    3691384    1213956  frame glue (collines begin, bsp jump)
+  8     3691384    3691386          2  bad/padding
+  9     3691386    3812716     121330  aim_record (the aim window leaf)
+ 10     3812716    3867126      54410  seg_pass1_leaf
+ 11     3867126    4073152     206026  seg_pass1_ts_leaf
+ 12     4073152    4265492     192340  thing_leaf
+ 13     4265492    4470164     204672  thing_leaf_b
+ 14     4470164    4663560     193396  thing_pass_leaf
+ 15     4663560    6254130    1590570  seg_pass2_leaf
+ 16     6254130    6259824       5694  bbgate_leaf
+ 17     6259824    6917442     657618  segconsts (per-seg/thing const blocks)
+ 18     6917442    8055534    1138092  bspcode walk (nodes, pos_leaf, ss code)
+ 19     8055534    8197484     141950  dsc walk (eye point-location)
+ 20     8197484    8339440     141956  dsccs walk (collision point-location)
+ 21     8339440   10273368    1933928  collision cells (tree, stubs, sim.line_test)
+ 22    10273368   12861578    2588210  ptloc_walk (M14-e point location)
+ 23    12998138   15619584    2621446  banks head (vars, sprbkt tables)
+ 24    15619584   18383352    2763768  vpb bands-as-code (plane bands)
+ 25    18383352   18712610     329258  banks tail (vql/vqh, yslope, zlight)
+ 26    18712610   18731500      18890  m1_reset code
+engine: C:\Users\tomhe\AppData\Local\Temp\profx65\engX\_fjcore.pyd
+FJPROFX map: 26 ranges, 17331716 opaque words of 117529408
+FJPROFX labels: 2595541 read, 1979092 flagged in opaque code
+FJPROFX marks: 29
+calibration: 390,984 ops, 4/4 frames, 2.1s
+game0: 1,571,537,761 ops, 104/104 frames, 16.4s
+game1: 1,367,505,479 ops, 104/104 frames, 13.9s
+game2: 1,406,570,383 ops, 104/104 frames, 15.0s
+game3: 1,653,972,377 ops, 104/104 frames, 16.9s
+game4: 1,485,814,895 ops, 104/104 frames, 15.0s
+game5: 1,546,464,016 ops, 104/104 frames, 15.8s
+game6: 1,455,891,978 ops, 104/104 frames, 14.8s
+game7: 1,393,401,007 ops, 104/104 frames, 14.6s
+game8: 1,141,228,843 ops, 104/104 frames, 12.4s
+game9: 1,106,362,208 ops, 104/104 frames, 12.1s
+prof_dump: 1044 present records -> C:\Users\tomhe\AppData\Local\Temp\profx65\games65.*
+total 422.0s
+engine: C:\Users\tomhe\AppData\Local\Temp\profx65\engX\_fjcore.pyd
+FJPROFX map: 26 ranges, 17331716 opaque words of 117529408
+FJPROFX labels: 2595541 read, 1979092 flagged in opaque code
+FJPROFX marks: 29
+still: 390,984 ops, 4/4 frames, 2.2s
+prof_dump: 4 present records -> C:\Users\tomhe\AppData\Local\Temp\profx65\cal65.*
+total 19.2s

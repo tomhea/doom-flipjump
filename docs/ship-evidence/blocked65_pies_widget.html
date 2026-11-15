@@ -1,0 +1,77 @@
+<h2 class="sr-only">Two donut charts for the shipped binary blocked65, sorted by share, each part of the program in the same color in both: FJ ops per mean game frame, 14.1 million, in 7 slices led by rendering walls at 62.1 percent; program size, 50.2 million memory words, in 8 slices led by lookup tables at 41.6 percent.</h2>
+<style>
+.pg{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:28px;padding:0.5rem 0 0.25rem}
+.lab{font-size:16px;font-weight:500;color:var(--text-primary);margin:0 0 10px}
+.wrap{position:relative;height:250px}
+.ctr{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none}
+.ctr b{font-size:20px;font-weight:500;color:var(--text-primary);font-variant-numeric:tabular-nums}
+.ctr span{font-size:12px;color:var(--text-muted)}
+.lg{list-style:none;margin:12px 0 0;padding:0;font-size:13px}
+.lg li{display:grid;grid-template-columns:12px minmax(0,1fr) auto 50px;gap:8px;align-items:center;padding:2px 0;color:var(--text-secondary);font-variant-numeric:tabular-nums}
+.lg i{width:10px;height:10px;border-radius:2px;display:block}
+.lg .v{color:var(--text-primary);text-align:right}
+.lg .p{text-align:right}
+</style>
+<div class="pg">
+  <div>
+    <p class="lab">FJ ops per mean frame</p>
+    <div class="wrap"><canvas id="opsPie" role="img" aria-label="Donut chart of FJ ops per mean game frame, 14.1 million, sorted: Render walls 62.1 percent, Render sprites 21.2, Render floors and ceilings 6.6, Render BSP walk 6.0, Collision and positions 2.0, Game logic status bar and menus 1.6, Frame reset input view 0.6">Render: walls 8,766,430; Render: sprites 2,998,828; Render: floors and ceilings 933,450; Render: BSP walk 841,185; Collision and positions 281,492; Game logic, status bar and menus 224,708; Frame reset, input, view 78,746.</canvas><div class="ctr"><b>14.1M</b><span>FJ ops</span></div></div>
+    <ul class="lg" id="opsLg"></ul>
+  </div>
+  <div>
+    <p class="lab">Program size</p>
+    <div class="wrap"><canvas id="sizePie" role="img" aria-label="Donut chart of program size, 50.2 million memory words, sorted: Lookup tables 41.6 percent, Floors and ceilings 16.3, Collision and positions 12.8, Game logic status bar and menus 9.5, Sprites 7.8, Walls 6.6, BSP walk 4.4, Frame reset input view 0.9">Lookup tables 20,905,172; Floors and ceilings 8,181,624; Collision and positions 6,445,658; Game logic, status bar and menus 4,789,844; Sprites 3,904,086; Walls 3,289,988; BSP walk 2,215,267; Frame reset, input, view 467,109.</canvas><div class="ctr"><b>50.2M</b><span>memory words</span></div></div>
+    <ul class="lg" id="sizeLg"></ul>
+  </div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script>
+const mode = document.documentElement.dataset.mode;
+const dark = mode ? mode === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+// one color per part of the program, the same in both charts (every neighbour pair and the wrap validated, both modes)
+const COL = dark
+  ? { walls: '#3987e5', sprites: '#d95926', bsp: '#008300', coll: '#c98500', floors: '#9085e9', game: '#199e70', reset: '#e66767', tables: '#65635e' }
+  : { walls: '#2a78d6', sprites: '#eb6834', bsp: '#008300', coll: '#eda100', floors: '#4a3aa7', game: '#1baf7a', reset: '#e34948', tables: '#7d7c78' };
+const css = getComputedStyle(document.documentElement);
+const gap = (css.getPropertyValue('--surface-0') || '').trim() || (dark ? '#1a1a19' : '#ffffff');
+const nf = new Intl.NumberFormat('en-US');
+// [key, name, value, description, percent, legend value] -- all computed by make_pies.py, sorted by value
+const sets = {
+  ops: { unit: 'ops', rows: [
+    ["walls", "Render: walls", 8766430, "wall columns and step faces, and putting each screen column together", "62.1%", "8.77M"],
+    ["sprites", "Render: sprites", 2998828, "monsters, items, decorations, fireballs, the weapon in hand: projecting, depth sorting, their pieces in each column", "21.2%", "3.00M"],
+    ["floors", "Render: floors and ceilings", 933450, "the floor and ceiling bands, and their parts of each column: which plane fills it, the floor and ceiling spliced around step faces", "6.6%", "933K"],
+    ["bsp", "Render: BSP walk", 841185, "walking the BSP tree front to back: which subsectors, walls and sprites are visible", "6.0%", "841K"],
+    ["coll", "Collision and positions", 281492, "every move (player, monsters, knockback, projectiles) tested against walls and things; point location; where things are", "2.0%", "281K"],
+    ["game", "Game logic, status bar and menus", 224708, "monsters, combat, weapons, doors, lifts, items, barrels; status bar, screen flashes, menu keys 1.8K", "1.6%", "225K"],
+    ["reset", "Frame reset, input, view", 78746, "frame reset 50.4K, input and move 14.7K, view 13.7K", "0.6%", "78.7K"]
+  ]},
+  size: { unit: 'words', rows: [
+    ["tables", "Lookup tables", 20905172, "542,974 tables in the pool (19.53M words); 1.37M more: the table part's, the state part's and the runtime's, with their word-flip chains", "41.6%", "20.91M"],
+    ["floors", "Floors and ceilings", 8181624, "the floor and ceiling rows compiled to code, their loaders, their parts of the column code, per-column plane cells", "16.3%", "8.18M"],
+    ["coll", "Collision and positions", 6445658, "collision cells and tests for every move; point-location trees; the thing lists", "12.8%", "6.45M"],
+    ["game", "Game logic, status bar and menus", 4789844, "monsters, combat, weapons, doors, lifts, items, barrels, state cells; menu and help screens and the status bar 589K", "9.5%", "4.79M"],
+    ["sprites", "Sprites", 3904086, "the pictures 2.53M, the weapon-in-hand pictures, drawing code, per-sprite constants and cells", "7.8%", "3.90M"],
+    ["walls", "Walls", 3289988, "drawing code, per-seg constants, the step-face columns", "6.6%", "3.29M"],
+    ["bsp", "BSP walk", 2215267, "the BSP tree and the per-subsector visits, compiled to code", "4.4%", "2.22M"],
+    ["reset", "Frame reset, input, view", 467109, "view 290K, frame reset 68.5K, input and move 60.2K, startup 48.2K", "0.9%", "467K"]
+  ]}
+};
+function draw(id, lgId, s) {
+  const rows = s.rows;
+  const colors = rows.map(r => COL[r[0]]);
+  document.getElementById(lgId).innerHTML = rows.map((r, i) =>
+    `<li><i style="background:${colors[i]}"></i><span>${r[1]}</span><span class="v">${r[5]}</span><span class="p">${r[4]}</span></li>`).join('');
+  new Chart(document.getElementById(id), {
+    type: 'doughnut',
+    data: { labels: rows.map(r => r[1]), datasets: [{ data: rows.map(r => r[2]), backgroundColor: colors, borderColor: gap, borderWidth: 2, hoverOffset: 4 }] },
+    options: { responsive: true, maintainAspectRatio: false, cutout: '58%',
+      plugins: { legend: { display: false }, tooltip: { callbacks: {
+        label: c => ` ${nf.format(c.raw)} ${s.unit} (${rows[c.dataIndex][4]})`,
+        afterLabel: c => ` ${rows[c.dataIndex][3]}`
+      } } } }
+  });
+}
+draw('opsPie', 'opsLg', sets.ops);
+draw('sizePie', 'sizeLg', sets.size);
+</script>

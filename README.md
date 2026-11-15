@@ -112,10 +112,9 @@ thousand lines; the loop above is all it does per op.
 
 **Python wrote the program; it does not run it.** The toolchain in `src/doomfj/` is a compiler. It
 reads a DOOM-format WAD and compiles the level's BSP tree, textures, flats, sprites, light tables and
-the game rules into FlipJump source, millions of lines of it, which the FlipJump assembler turns
-into the memory image. That happens once, on a build machine, in about 45 minutes with about
-10 GB of RAM. <!-- TODO: blocked62's exact source size, build time and peak RSS. --> Players never
-run it.
+the game rules into FlipJump source, three million lines of it, which the FlipJump assembler turns
+into the memory image. That happens once, on a build machine, in about 13 minutes with about
+6 GB of RAM. Players never run it.
 
 **How a one-instruction machine renders anything.** A FlipJump "if" is a jump whose target address
 had a bit flipped by earlier code. Arithmetic is lookup tables laid out in the address space so that
@@ -137,12 +136,12 @@ number below rests on anyone's word; each is recorded next to the command that p
 ## The numbers
 
 <p align="center">
-  <img src="docs/media/blocked62_pies.png" width="900"
-       alt="Two donut charts: where the 16.1M flip-jumps of a mean frame go, and what the 52.1M-word program is made of">
+  <img src="docs/media/blocked65_pies.png" width="900"
+       alt="Two donut charts: where the 14.1M flip-jumps of a mean frame go, and what the 50.2M-word program is made of">
 </p>
-<p align="center"><sub>Left: a mean frame of the benchmark tours. Drawing walls is 60% of it and sprites 24%; all the game logic, the
-status bar and the menus together are 1.6%. Right: the program. Lookup tables are 41% of it, which is the whole
-trick: arithmetic is read, not computed. Measured on blocked62; the shipped blocked65 is the same game on flipjump 1.6.0's library, 12.6% fewer flip-jumps a frame, not re-profiled.</sub></p>
+<p align="center"><sub>Left: a mean frame of the benchmark tours. Drawing walls is 62% of it and sprites 21%; all the game logic, the
+status bar and the menus together are 1.6%. Right: the program. Lookup tables are 42% of it, which is the whole
+trick: arithmetic is read, not computed. Measured on the shipped build, blocked65.</sub></p>
 
 | | |
 |---|---|
@@ -153,7 +152,7 @@ trick: arithmetic is read, not computed. Measured on blocked62; the shipped bloc
 | a 32-bit addition | about 340 flip-jumps, its tables placed the way the game places them; so a pixel costs about two and a half additions |
 | the screen | 160 x 100, 256 colours, a 16-row status bar |
 | the check | every frame of eleven scripted fights identical, pixel for pixel, to the Python model |
-| the build | one pass, about 45 minutes, about 10 GB of RAM |
+| the build | one pass, about 13 minutes, about 6 GB of RAM |
 
 Every number comes from the record of the shipped build, `doom_e1m1_blocked65.fjm`, the release's `doom.fjm`
 (SHA-256 `3a2c9564...af3815d3b`), where each stands next to the command that produced it:
@@ -189,7 +188,7 @@ on the way is in [docs/ship-gate.md](docs/ship-gate.md).
 
 **Can I build it myself?** You do not need to: the built game is one file, and [Try it](#try-it) above
 runs it in three lines. If you want to build it anyway, [docs/developing.md](docs/developing.md) has the
-recipe; the build takes about 45 minutes.
+recipe; the build takes about 13 minutes.
 
 ## The story, in sixty seconds
 

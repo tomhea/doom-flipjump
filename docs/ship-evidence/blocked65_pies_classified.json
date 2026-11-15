@@ -1,0 +1,85 @@
+{
+ "size": {
+  "BSP walk": [
+   1143804.0,
+   1071463.3610905416
+  ],
+  "Collision and positions": [
+   3657324.0,
+   2788333.4471532004
+  ],
+  "Floors and ceilings": [
+   3252170.0,
+   4929454.403675468
+  ],
+  "Frame reset": [
+   18890.0,
+   49622.64340265925
+  ],
+  "Game logic": [
+   2501060.0,
+   1699745.7125849645
+  ],
+  "Input and move": [
+   55740.0,
+   4451.243495775656
+  ],
+  "Lookup tables": [
+   20797828.0,
+   107344.0
+  ],
+  "Sprites": [
+   3700336.0,
+   203750.04970865085
+  ],
+  "Startup": [
+   48228.0,
+   0.0
+  ],
+  "Status bar and menus": [
+   586658.0,
+   2379.757529076783
+  ],
+  "View": [
+   146352.0,
+   143825.25330796366
+  ],
+  "Walls": [
+   2357098.0,
+   932890.1280516958
+  ]
+ },
+ "ops": {
+  "Lookup tables": 0.0,
+  "Input and move": 14667.067,
+  "Status bar and menus": 1773.285,
+  "Game logic": 222934.692,
+  "View": 13687.993,
+  "Collision and positions": 281492.051,
+  "BSP walk": 841184.535,
+  "Sprites": 2998828.09,
+  "Walls": 8766430.446,
+  "Floors and ceilings": 933449.566,
+  "Frame reset": 50391.382
+ },
+ "borders": {
+  "code_start": 17308,
+  "tables": 65536,
+  "hot": 1263224,
+  "segconsts": 6259824,
+  "walk": 6917442,
+  "state": 12861578,
+  "banks": 12998138,
+  "sprite_bank": 13085234,
+  "vpb": 15619584,
+  "vql": 18383352,
+  "reset": 18712610,
+  "wflip": [
+   18731500,
+   30664760
+  ],
+  "pool_stored": 19533988,
+  "total_stored": 50198748,
+  "pool_tables": 542974
+ }
+}

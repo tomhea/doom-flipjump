@@ -8,39 +8,47 @@ PASS ops Render: walls                  8766430 == classified 8766430.4 (+-1 rou
 PASS ops Render: walls percent 62.1%
 PASS ops Render: walls legend value 8.77M
 PASS ops Render: walls has a description
+PASS ops Render: walls description numbers []
 PASS ops Render: sprites                2998828 == classified 2998828.1 (+-1 rounding)
 PASS ops Render: sprites percent 21.2%
 PASS ops Render: sprites legend value 3.00M
 PASS ops Render: sprites has a description
+PASS ops Render: sprites description numbers []
 PASS ops Render: floors and ceilings    933450 == classified 933449.6 (+-1 rounding)
 PASS ops Render: floors and ceilings percent 6.6%
 PASS ops Render: floors and ceilings legend value 933K
 PASS ops Render: floors and ceilings has a description
+PASS ops Render: floors and ceilings description numbers []
 PASS ops Render: BSP walk               841185 == classified 841184.5 (+-1 rounding)
 PASS ops Render: BSP walk percent 6.0%
 PASS ops Render: BSP walk legend value 841K
 PASS ops Render: BSP walk has a description
+PASS ops Render: BSP walk description numbers []
 PASS ops Collision and positions        281492 == classified 281492.1 (+-1 rounding)
 PASS ops Collision and positions percent 2.0%
 PASS ops Collision and positions legend value 281K
 PASS ops Collision and positions has a description
+PASS ops Collision and positions description numbers []
 PASS ops Game logic, status bar and menus 224708 == classified 224708.0 (+-1 rounding)
 PASS ops Game logic, status bar and menus percent 1.6%
 PASS ops Game logic, status bar and menus legend value 225K
 PASS ops Game logic, status bar and menus has a description
+PASS ops Game logic, status bar and menus description numbers ['1.8K']
 PASS ops Frame reset, input, view       78746 == classified 78746.4 (+-1 rounding)
 PASS ops Frame reset, input, view percent 0.6%
 PASS ops Frame reset, input, view legend value 78.7K
 PASS ops Frame reset, input, view has a description
+PASS ops Frame reset, input, view description numbers ['50.4K', '14.7K', '13.7K']
 PASS ops canvas aria + fallback parse
 PASS ops aria lists 7 slices
-PASS ops aria 'Render walls 62.1 percent' starts 'Render walls 62.1'
-PASS ops aria 'Render sprites 21.2' starts 'Render sprites 21.2'
-PASS ops aria 'Render floors and ceilings 6.6' starts 'Render floors and ceilings 6.6'
-PASS ops aria 'Render BSP walk 6.0' starts 'Render BSP walk 6.0'
-PASS ops aria 'Collision and positions 2.0' starts 'Collision and positions 2.0'
-PASS ops aria 'Game logic status bar and menus 1.6' starts 'Game logic status bar and menus 1.6'
-PASS ops aria 'Frame reset input view 0.6' starts 'Frame reset input view 0.6'
+PASS ops aria 'Render walls 62.1 percent' is 'Render walls 62.1 percent'
+PASS ops aria 'Render sprites 21.2' is 'Render sprites 21.2'
+PASS ops aria 'Render floors and ceilings 6.6' is 'Render floors and ceilings 6.6'
+PASS ops aria 'Render BSP walk 6.0' is 'Render BSP walk 6.0'
+PASS ops aria 'Collision and positions 2.0' is 'Collision and positions 2.0'
+PASS ops aria 'Game logic status bar and menus 1.6' is 'Game logic status bar and menus 1.6'
+PASS ops aria 'Frame reset input view 0.6' is 'Frame reset input view 0.6'
+PASS ops fallback lists 7 slices
 PASS ops fallback 'Render: walls 8,766,430'
 PASS ops fallback 'Render: sprites 2,998,828'
 PASS ops fallback 'Render: floors and ceilings 933,450'
@@ -56,55 +64,64 @@ PASS size Lookup tables                  20905172 == classified 20905172.0 (+-1 
 PASS size Lookup tables percent 41.6%
 PASS size Lookup tables legend value 20.91M
 PASS size Lookup tables has a description
-PASS size Floors and ceilings            8181624 == classified 8181624.4 (+-1 rounding)
-PASS size Floors and ceilings percent 16.3%
-PASS size Floors and ceilings legend value 8.18M
+PASS size Lookup tables description numbers ['542,974', '19.53M', '1.37M']
+PASS size Floors and ceilings            7870959 == classified 7870959.1 (+-1 rounding)
+PASS size Floors and ceilings percent 15.7%
+PASS size Floors and ceilings legend value 7.87M
 PASS size Floors and ceilings has a description
+PASS size Floors and ceilings description numbers []
 PASS size Collision and positions        6445658 == classified 6445657.4 (+-1 rounding)
 PASS size Collision and positions percent 12.8%
 PASS size Collision and positions legend value 6.45M
 PASS size Collision and positions has a description
-PASS size Game logic, status bar and menus 4789844 == classified 4789843.5 (+-1 rounding)
-PASS size Game logic, status bar and menus percent 9.5%
-PASS size Game logic, status bar and menus legend value 4.79M
+PASS size Collision and positions description numbers []
+PASS size Game logic, status bar and menus 4939835 == classified 4939834.8 (+-1 rounding)
+PASS size Game logic, status bar and menus percent 9.8%
+PASS size Game logic, status bar and menus legend value 4.94M
 PASS size Game logic, status bar and menus has a description
+PASS size Game logic, status bar and menus description numbers ['739K']
 PASS size Sprites                        3904086 == classified 3904086.0 (+-1 rounding)
 PASS size Sprites percent 7.8%
 PASS size Sprites legend value 3.90M
 PASS size Sprites has a description
+PASS size Sprites description numbers ['2.53M']
 PASS size Walls                          3289988 == classified 3289988.1 (+-1 rounding)
 PASS size Walls percent 6.6%
 PASS size Walls legend value 3.29M
 PASS size Walls has a description
+PASS size Walls description numbers []
 PASS size BSP walk                       2215267 == classified 2215267.4 (+-1 rounding)
 PASS size BSP walk percent 4.4%
 PASS size BSP walk legend value 2.22M
 PASS size BSP walk has a description
-PASS size Frame reset, input, view       467109 == classified 467109.1 (+-1 rounding)
-PASS size Frame reset, input, view percent 0.9%
-PASS size Frame reset, input, view legend value 467K
-PASS size Frame reset, input, view has a description
+PASS size BSP walk description numbers []
+PASS size Frame reset, input, view, startup 627783 == classified 627783.1 (+-1 rounding)
+PASS size Frame reset, input, view, startup percent 1.3%
+PASS size Frame reset, input, view, startup legend value 628K
+PASS size Frame reset, input, view, startup has a description
+PASS size Frame reset, input, view, startup description numbers ['209K', '290K', '68.5K', '60.2K']
 PASS size canvas aria + fallback parse
 PASS size aria lists 8 slices
-PASS size aria 'Lookup tables 41.6 percent' starts 'Lookup tables 41.6'
-PASS size aria 'Floors and ceilings 16.3' starts 'Floors and ceilings 16.3'
-PASS size aria 'Collision and positions 12.8' starts 'Collision and positions 12.8'
-PASS size aria 'Game logic status bar and menus 9.5' starts 'Game logic status bar and menus 9.5'
-PASS size aria 'Sprites 7.8' starts 'Sprites 7.8'
-PASS size aria 'Walls 6.6' starts 'Walls 6.6'
-PASS size aria 'BSP walk 4.4' starts 'BSP walk 4.4'
-PASS size aria 'Frame reset input view 0.9' starts 'Frame reset input view 0.9'
+PASS size aria 'Lookup tables 41.6 percent' is 'Lookup tables 41.6 percent'
+PASS size aria 'Floors and ceilings 15.7' is 'Floors and ceilings 15.7'
+PASS size aria 'Collision and positions 12.8' is 'Collision and positions 12.8'
+PASS size aria 'Game logic status bar and menus 9.8' is 'Game logic status bar and menus 9.8'
+PASS size aria 'Sprites 7.8' is 'Sprites 7.8'
+PASS size aria 'Walls 6.6' is 'Walls 6.6'
+PASS size aria 'BSP walk 4.4' is 'BSP walk 4.4'
+PASS size aria 'Frame reset input view startup 1.3' is 'Frame reset input view startup 1.3'
+PASS size fallback lists 8 slices
 PASS size fallback 'Lookup tables 20,905,172'
-PASS size fallback 'Floors and ceilings 8,181,624'
+PASS size fallback 'Floors and ceilings 7,870,959'
 PASS size fallback 'Collision and positions 6,445,658'
-PASS size fallback 'Game logic, status bar and menus 4,789,844'
+PASS size fallback 'Game logic, status bar and menus 4,939,835'
 PASS size fallback 'Sprites 3,904,086'
 PASS size fallback 'Walls 3,289,988'
 PASS size fallback 'BSP walk 2,215,267'
-PASS size fallback 'Frame reset, input, view 467,109'
+PASS size fallback 'Frame reset, input, view, startup 627,783'
 PASS size center + aria total 50.2M
-PASS sr heading: ops slice count + lead
-PASS sr heading: size slice count + lead
+PASS sr heading ends 'FJ ops per mean game frame, 14.1 million, in 7 slices led by rendering walls at 62.1 percent; program size, 50.2 million memory words, in 8 slices led by lookup tables at 41.6 percent.'
+PASS sr heading: the leading slices
 PASS every key has a light and a dark color
 PASS no two keys share a color
 PASS validator ops light: Lightness=PASS Chroma=PASS CVD=WARN Normal-vision=PASS Contrast=WARN
@@ -112,4 +129,4 @@ PASS validator ops dark: Lightness=PASS Chroma=PASS CVD=WARN Normal-vision=PASS 
 PASS validator size light: Lightness=PASS Chroma=FAIL CVD=WARN Normal-vision=PASS Contrast=WARN
 PASS validator size dark: Lightness=PASS Chroma=FAIL CVD=PASS Normal-vision=PASS Contrast=WARN
 
-112 checks, 0 FAIL
+129 checks, 0 FAIL

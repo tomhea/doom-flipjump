@@ -116,7 +116,6 @@ LABEL_CAT = {"kb_cell": "Collision and positions",       # knockback's P_CheckPo
              "sa_nfi": "Status bar and menus",   # the world / menu-screen dispatch (mn)
              "lt_bc_end": "Input and move",              # the turn keys (simth) begin
              "pl_out": "BSP walk",                       # the render walk's jump (e1m1_bspcode_walk)
-             "io_boot": "Startup",                       # M8/1.6.0: the screen init + palettes, cold, once at boot
              "p5_bar_skip": "Game logic"}                # the aim window's prologue (aim_sid, aimr) -- the palette
                                                          #   statements after it are split off below
 
@@ -157,7 +156,7 @@ def code_cat(f, where):
 
 # ---------------------------------------------------------------------------------------------- data labels
 FLOOR_COLS = re.compile(r"col_(floor|ceil|plight|fstart|cexcl|fend|cend|flr|clg)")
-# the variables, by their declarations (wall_renderer / config / selfreset / collision): see the audit in the session
+# the variables, by their declarations (wall_renderer / config / selfreset / collision)
 WALL_CELLS = {"stepcol",                                   # the step bank (_lines_step_bank): risers and lips
               "sfslot", "sfflag",                          # per-column step-face pieces (config STEP_SLOT_STRIDE)
               "tsf", "seg", "wnt", "wex", "wey", "wexy", "weyx", "wnoff"}
@@ -214,6 +213,16 @@ for a_, names_ in by_addr.items():
         n_ = pick(names_, True)
         if n_ is not None:
             cat_at[a_] = label_cat(n_, "main" if a_ < SEGC else ("segc" if a_ < WALK0 else "walk"))
+# the banks part's tail [vql_blk__, m1_reset) is three runs, each of its own label families: the vq loaders and the
+# floor's tables; the baked pages (the menu frames, the map page and its producers); the boot screen (init_screen and
+# the palettes, run once from the entry)
+FLOOR_TAIL, PAGES, BOOT = {"vpb", "vql", "vqh", "yslope", "zlight", "distscale"}, {"mf", "menu", "am"}, {"io"}
+tail = [(a_, fam(n_)) for a_, n_ in rows if VQL0 <= a_ < RESET0 and not ELEM.match(n_) and "---" not in n_]
+PAGES0, BOOT0 = min(a_ for a_, f_ in tail if f_ in PAGES), byname["io_boot"]
+assert VQL0 < PAGES0 < BOOT0 < RESET0, (VQL0, PAGES0, BOOT0, RESET0)
+assert all(f_ in (FLOOR_TAIL if a_ < PAGES0 else PAGES if a_ < BOOT0 else BOOT) for a_, f_ in tail), tail
+print("banks tail: vq loaders + floor tables [%d, %d), baked pages [%d, %d), boot screen [%d, %d)"
+      % (VQL0, PAGES0, PAGES0, BOOT0, BOOT0, RESET0))
 # the data parts' first words keep their LABEL's category (finer); every other border overrides a label there
 cat_at.setdefault(TABLES0, "Lookup tables")
 cat_at.setdefault(STATE0, "Game logic")
@@ -222,6 +231,7 @@ for a, c in [(0, "Lookup tables"),                               # the stl runti
              (HOT, "Input and move"),                            # kb.poll x8 + the key decode (profx's first object)
              (SPRB0, "Sprites"),                                 # the sprite bank: the pictures
              (VPB0, "Floors and ceilings"), (VQL0, "Floors and ceilings"),   # the bands-as-code, their vq loaders
+             (PAGES0, "Status bar and menus"), (BOOT0, "Startup"),
              (RESET0, "Frame reset"), (W0, "WFLIP"), (W1, "GAP"), (POOL0, "Lookup tables")]:
     cat_at[a] = c
 # a leaf's base filler (`rep(N, i) stl.fj 0, 0` right before its label) is that leaf's layout, not the preceding
@@ -314,8 +324,8 @@ iv = sorted(cat_at.items())
 starts = np.array([a for a, _ in iv], dtype=np.int64)
 names = np.array([c for _, c in iv])
 np.savez(OUT.replace('.json', '_iv.npz'), starts=starts, names=names)   # the address -> category map, for audits
-# nothing between VPB0 and W0 may come from a label (the bands, the loaders, the reset are one category each)
-assert not ((starts > VPB0) & (starts < W0) & ~np.isin(starts, [VQL0, RESET0])).any()
+# nothing between VPB0 and W0 may come from a label (the bands, the tail's three runs, the reset: one category each)
+assert not ((starts > VPB0) & (starts < W0) & ~np.isin(starts, [VQL0, PAGES0, BOOT0, RESET0])).any()
 CATS = sorted({c for c in names if c not in ("WFLIP", "GAP")})
 ci = {c: i for i, c in enumerate(CATS)}
 
@@ -420,6 +430,7 @@ print("  total %.1f per frame" % (pc.sum() / 1000))
 json.dump({"size": {c: [float(own[ci[c]]), float(share[ci[c]])] for c in CATS},
            "ops": {c: v / 1000 for c, v in ops.items()},
            "borders": dict(code_start=CODE0, tables=TABLES0, hot=HOT, segconsts=SEGC, walk=WALK0, state=STATE0,
-                           banks=BANKS0, sprite_bank=SPRB0, vpb=VPB0, vql=VQL0, reset=RESET0, wflip=[W0, W1],
+                           banks=BANKS0, sprite_bank=SPRB0, vpb=VPB0, vql=VQL0, pages=PAGES0, boot=BOOT0,
+                           reset=RESET0, wflip=[W0, W1],
                            pool_stored=POOL_STORED, total_stored=TOTAL, pool_tables=POOL_TABLES)},
           open(OUT, "w"), indent=1)

@@ -42,7 +42,8 @@ GROUPS = [  # key, ops name, size name, member categories
     ("coll", "Collision and positions", "Collision and positions", ["Collision and positions"]),
     ("floors", "Render: floors and ceilings", "Floors and ceilings", ["Floors and ceilings"]),
     ("game", "Game logic, status bar and menus", "Game logic, status bar and menus", ["Game logic", "Status bar and menus"]),
-    ("reset", "Frame reset, input, view", "Frame reset, input, view", ["Frame reset", "Input and move", "View", "Startup"]),
+    ("reset", "Frame reset, input, view", "Frame reset, input, view, startup",
+     ["Frame reset", "Input and move", "View", "Startup"]),
     ("tables", None, "Lookup tables", ["Lookup tables"]),
 ]
 covered = {c for g in GROUPS for c in g[3]}
@@ -90,11 +91,11 @@ SDESC = {
               "with their word-flip chains" % (format(B["pool_tables"], ","), short(POOL), short(rest_tables)),
     "coll": "collision cells and tests for every move; point-location trees; the thing lists",
     "floors": "the floor and ceiling rows compiled to code, their loaders, their parts of the column code, per-column plane cells",
-    "game": "monsters, combat, weapons, doors, lifts, items, barrels, state cells; menu and help screens and the status bar %s" % short(size["Status bar and menus"]),
+    "game": "monsters, combat, weapons, doors, lifts, items, barrels, state cells; the menu, help and map screens and the status bar %s" % short(size["Status bar and menus"]),
     "sprites": "the pictures %s, the weapon-in-hand pictures, drawing code, per-sprite constants and cells" % short(PIC),
     "walls": "drawing code, per-seg constants, the step-face columns",
     "bsp": "the BSP tree and the per-subsector visits, compiled to code",
-    "reset": "view %s, frame reset %s, input and move %s, startup %s" % tuple(short(r_size[c]) for c in ("View", "Frame reset", "Input and move", "Startup")),
+    "reset": "startup and the boot screen %s, view %s, frame reset %s, input and move %s" % tuple(short(r_size[c]) for c in ("Startup", "View", "Frame reset", "Input and move")),
 }
 names_o = {k: o for k, o, _s, _c in GROUPS if o}
 names_s = {k: s for k, _o, s, _c in GROUPS}

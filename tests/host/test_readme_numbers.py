@@ -1,7 +1,10 @@
-"""The README's and the story's numbers for the shipped build are the measured ones: the chart's shares come from the
-classifier's output and the build's time and RAM from the timed rebuild's log (docs/ship-evidence; ship-gate.md 15)."""
+"""The README's, the story's and the developing guide's numbers for the shipped build are the measured ones: the
+chart's shares come from the classifier's output, the build's time and RAM from the timed rebuild's log, and the timed
+rebuild is the shipped binary by its hash (docs/ship-evidence; ship-gate.md 15)."""
+import importlib.util
 import json
 import re
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -12,6 +15,10 @@ GAME = ("Game logic", "Status bar and menus")
 def prose(relative):
     """a document's text on one line (a caption wraps where its editor wrapped it)"""
     return " ".join((ROOT / relative).read_text(encoding="utf-8").split())
+
+
+def evidence_lines(name):
+    return (EVIDENCE / name).read_text(encoding="ascii").splitlines()
 
 
 def classified():
@@ -32,13 +39,13 @@ def percent(parts, *categories):
     return 100 * sum(parts[category] for category in categories) / sum(parts.values())
 
 
-def millions(parts):
-    return "%.1fM" % (sum(parts.values()) / 1e6)
+def millions(parts, digits=1):
+    return "%.*fM" % (digits, sum(parts.values()) / 1e6)
 
 
 def rebuild():
     """the timed rebuild: rss_run.py's record, the last line of the build's log"""
-    last = (EVIDENCE / "blocked65_remeasure_build.log").read_text(encoding="ascii").splitlines()[-1]
+    last = evidence_lines("blocked65_remeasure_build.log")[-1]
     assert last.startswith("RSS_RUN "), last[:40]
     return json.loads(last[len("RSS_RUN "):])
 
@@ -49,6 +56,15 @@ def build_minutes():
 
 def build_ram():
     return "about %d GB of RAM" % round(rebuild()["peak_tree_private_gb"])
+
+
+def shipped_sha256():
+    """E1M1's recorded hash, from the episode creator's registry"""
+    spec = importlib.util.spec_from_file_location("build_episode", ROOT / "scripts" / "build_episode.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules.setdefault("build_episode", module)        # dataclasses resolve the module by name
+    spec.loader.exec_module(module)
+    return module.REGISTRY["E1M1"].recorded_sha256
 
 
 def test_the_readme_caption_carries_the_measured_shares():
@@ -68,17 +84,19 @@ def test_the_story_caption_carries_the_measured_shares():
 
 
 def test_both_captions_carry_the_measured_totals():
-    ops, words = millions(frame_ops()), millions(program_words())
-    assert "where the %s flip-jumps of a mean frame go, and what the %s-word program is made of" % (ops, words) \
-        in prose("README.md")
+    ops, words = frame_ops(), program_words()
+    assert ("where the %s flip-jumps of a mean frame go, and what the %s-word program is made of"
+            % (millions(ops), millions(words))) in prose("README.md")
     story = prose("docs/story.md")
-    assert "the %s flip-jumps of a mean frame" % ops in story
-    assert "the %s-word program" % words in story
+    assert "what the %s-word program is made of" % millions(words, digits=0) in story
+    assert "the %s flip-jumps of a mean frame" % millions(ops) in story
+    assert "the %s-word program" % millions(words) in story
 
 
-def test_both_documents_say_the_chart_is_the_shipped_builds():
-    assert "Measured on the shipped build, blocked65." in prose("README.md")
-    assert "Measured on the shipped build, blocked65." in prose("docs/story.md")
+def test_the_measured_build_is_the_shipped_binary():
+    assert "sha256 " + shipped_sha256() in evidence_lines("blocked65_remeasure_chain.log")
+    for relative in ("README.md", "docs/story.md"):
+        assert "Measured on the shipped build, blocked65." in prose(relative), relative
 
 
 def test_each_document_shows_a_chart_that_is_in_the_repo():
@@ -89,10 +107,8 @@ def test_each_document_shows_a_chart_that_is_in_the_repo():
         assert pictures[0].endswith("media/blocked65_pies.png"), (relative, pictures[0])
 
 
-def test_the_build_time_and_ram_are_the_timed_rebuilds():
-    readme = prose("README.md")
-    assert readme.count(build_minutes()) == 3, build_minutes()
-    assert readme.count(build_ram()) == 2, build_ram()
-    assert build_ram() in prose("docs/developing.md")
-    assert not re.search(r"about \d+ minutes", readme.replace(build_minutes(), ""))
-    assert not re.search(r"\d+ GB of RAM", readme.replace(build_ram(), ""))
+def test_every_build_time_and_ram_is_the_timed_rebuilds():
+    readme, developing = prose("README.md"), prose("docs/developing.md")
+    assert set(re.findall(r"about \d+ minutes", readme)) == {build_minutes()}
+    assert set(re.findall(r"about \d+ GB of RAM", readme)) == {build_ram()}
+    assert set(re.findall(r"\d+ GB of RAM", readme + developing)) == {build_ram()[len("about "):]}

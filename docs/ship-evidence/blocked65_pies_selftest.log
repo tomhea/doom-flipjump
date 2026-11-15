@@ -1,0 +1,18 @@
+totals: game-only ops 14,124,839,107 (per frame 14124839.1), stored words 50,198,748
+a row value off by 1,000               CAUGHT (3 fails, e.g. FAIL ops sums to 14124839 (got 14125839))
+a percent string wrong                 CAUGHT (2 fails, e.g. FAIL ops Game logic, status bar and menus percent 9.9%)
+a legend value wrong                   CAUGHT (1 fails, e.g. FAIL ops Render: walls legend value 9.99M)
+a description number wrong             CAUGHT (1 fails, e.g. FAIL size Sprites description numbers ['9.99M'])
+an aria percent wrong                  CAUGHT (1 fails, e.g. FAIL ops aria 'Render sprites 99.9' is 'Render sprites 21.2')
+an aria percent with a digit more      CAUGHT (1 fails, e.g. FAIL ops aria 'Render sprites 21.29' is 'Render sprites 21.2')
+the fallback text cut short            CAUGHT (1 fails, e.g. FAIL ops fallback lists 7 slices)
+a fallback number wrong                CAUGHT (1 fails, e.g. FAIL ops fallback 'Render: walls 9,999')
+the centre total wrong                 CAUGHT (1 fails, e.g. FAIL ops center + aria total 14.1M)
+the heading's ops total wrong          CAUGHT (1 fails, e.g. FAIL sr heading ends 'FJ ops per mean game frame, 14.1 million, in 7 slices led by renderi)
+the heading's size total wrong         CAUGHT (1 fails, e.g. FAIL sr heading ends 'FJ ops per mean game frame, 14.1 million, in 7 slices led by renderi)
+two rows out of order                  CAUGHT (9 fails, e.g. FAIL ops sorted by value)
+a size row value replaced              CAUGHT (14 fails, e.g. FAIL size sums to 50198748 (got 47983482))
+two light colors the same              CAUGHT (1 fails, e.g. FAIL no two keys share a color)
+two dark colors the same               CAUGHT (1 fails, e.g. FAIL no two keys share a color)
+sprites and collision exchange colors  CAUGHT (2 fails, e.g. FAIL validator ops light: Lightness=PASS Chroma=PASS CVD=FAIL Normal-vision=PASS Contrast=)
+selftest PASS

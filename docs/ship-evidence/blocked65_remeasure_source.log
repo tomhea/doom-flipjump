@@ -1,0 +1,12 @@
+$ ls build/pies65/generated_doom_e1m1
+e1m1_00_entry.fj
+e1m1_01_tables.fj
+e1m1_02_main.fj
+e1m1_03_segconsts.fj
+e1m1_04_walk.fj
+e1m1_05_state.fj
+e1m1_06_banks.fj
+e1m1_07_reset.fj
+fj_consts.fj
+$ cat build/pies65/generated_doom_e1m1/*.fj | wc -lc
+3003454 67826314

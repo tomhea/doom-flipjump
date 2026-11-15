@@ -1395,3 +1395,96 @@ two failed steps ran, 804 s + 936 s) reproduced both numbers to the op and ended
 
 **The owner, 2026-11-05: "i allow E1M6 to be over the 22M cap on its combat set."** E1M6 ships with its B0 at
 25,737,929 and its tours at 25,479,320; the creator's allowance stays bounded by those two numbers (one op more fails).
+
+## 15. The shipped build timed, and the README's chart measured on it (2026-11-15)
+
+fjdoom main at `942f8713` (#177) with flipjump `7a49ef1` (branch `1.6.0`; `blocked65_remeasure_chain.log` prints both),
+on the box of sections 12-14 (15.6 GB of RAM). The README's build time, build RAM and its two charts are this
+section's numbers; `tests/host/test_readme_numbers.py` holds the README, `docs/story.md` and `docs/developing.md` to
+the files they come from (`blocked65_pies_classified.json`, `blocked65_remeasure_build.log`,
+`blocked65_remeasure_chain.log`).
+
+**The build.** Section 1b's line into `build/pies65/` with an empty counts cache, under `scratchpad/12m/rss_run.py`
+(it samples the memory of the build's whole process tree):
+
+```
+python scripts/heavy.py pies65-build --build --log build.log -- python scratchpad/12m/rss_run.py build_rss.json -- python scratchpad/12m/build_labeled.py --labels build/pies65/doom_e1m1.labels.tsv.gz -- game --out build/pies65/doom_e1m1.fjm --pool-base 0x80000000 --span-bits 0x7fffffe0 --pin-state-cells --merge-aliases --spread 2 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --one-pass-blocks --counts-cache build/pies65/census_e1m1.json.gz --pin-heat scratchpad/12m/heat_e1m1_adopt.json.gz
+sha256sum build/pies65/doom_e1m1.fjm
+cat build/pies65/generated_doom_e1m1/*.fj | wc -lc
+python scripts/build_episode.py --maps E1M2 E1M3 E1M4 E1M5 E1M6 E1M7 E1M8 E1M9 --steps build sha256 --out-dir build/episode_7a49 --name episode-7a49
+```
+
+| | | evidence |
+|---|---|---|
+| the binary | BYTE-IDENTICAL to blocked65, sha256 `3a2c9564adbfcb07a1378b6c0045ca2291246c4100abcafad68bae4af3815d3b` | `blocked65_remeasure_chain.log` |
+| wall time | **783 s** (13 min 3 s); the build's own `total 781s`, of it the assembly 400 s | `blocked65_remeasure_build.log` (its last line is `rss_run.py`'s record) |
+| peak memory of the process tree | **6.09 GB** private, 6.03 GB resident (1,545 samples); the kernel's peak for the root process: 6.22 GB working set | the same line |
+| the generated source | 3,003,454 lines, 67.8 MB, in nine files (the standard library not counted) | `blocked65_remeasure_source.log` |
+| the other eight levels | each BYTE-IDENTICAL to its record; 9 to 25 minutes a build | `episode_7a49_report.md` |
+
+Not covered: the time and the memory are one run, on one box, of E1M1; the other eight levels ran without the memory
+sampler. The record's own build of blocked65 (`blocked65_build.log`, flipjump `9877f25`) took 1709 s, its assembly
+969 s; the cause of the difference was not looked for.
+
+**The chart** (`docs/media/blocked65_pies.png`). The profile is gamespeed's ten games and its calibration run on the
+FJPROFX engine; `scratchpad/12m/pies/` turns it into the picture:
+
+```
+cd scratchpad/12m/profx        # PROFX_WORK=<work dir>, PROFX_FJM / PROFX_LABELS_TSV = the build above
+python profx.py engine
+python maps.py --labels <labels.tsv.gz> --gen-dir build/pies65/generated_doom_e1m1
+python -u drive.py games games65
+python -u drive.py still 0 cal65
+cd ../pies                     # PALETTE_VALIDATOR=<dataviz skill>/scripts/validate_palette.js
+python classify.py <labels.tsv.gz> <doom_e1m1.fjm> <generated dir> <work>/games65.incl.bin <work>/cal65.incl.bin classified.json
+python make_pies.py classified.json pies.html
+python make_pies.py --page pies.html page.html
+msedge --headless=new --force-device-scale-factor=3 --window-size=1104,530 --virtual-time-budget=8000 --screenshot=blocked65_pies.png page.html
+python audit_pies.py pies.html classified.json <work>/games65.runs.json <work>/cal65.runs.json <doom_e1m1.fjm>
+python audit_pies.py --selftest pies.html classified.json <work>/games65.runs.json <work>/cal65.runs.json <doom_e1m1.fjm>
+```
+
+The palette validator is the one bundled with Claude Code 2.1.325's dataviz skill (`validate_palette.js`, sha256
+`1abb85b5108051e6`); it is not in this repository.
+
+| a mean frame's flip-jumps | | | the program's words | | |
+|---|---|---|---|---|---|
+| Walls | 8,766,430 | 62.06% | Lookup tables | 20,905,172 | 41.64% |
+| Sprites | 2,998,828 | 21.23% | Floors and ceilings | 7,870,959 | 15.68% |
+| Floors and ceilings | 933,450 | 6.61% | Collision and positions | 6,445,658 | 12.84% |
+| BSP walk | 841,185 | 5.96% | Game logic | 4,200,806 | 8.37% |
+| Collision and positions | 281,492 | 1.99% | Sprites | 3,904,086 | 7.78% |
+| Game logic | 222,935 | 1.58% | Walls | 3,289,988 | 6.55% |
+| Frame reset | 50,391 | 0.36% | BSP walk | 2,215,267 | 4.41% |
+| Input and move | 14,667 | 0.10% | Status bar and menus | 739,029 | 1.47% |
+| View | 13,688 | 0.10% | View | 290,177 | 0.58% |
+| Status bar and menus | 1,773 | 0.01% | Startup | 208,902 | 0.42% |
+| | | | Frame reset | 68,513 | 0.14% |
+| | | | Input and move | 60,191 | 0.12% |
+| **total** | **14,124,839** | | **total** | **50,198,748** | |
+
+(Each column is rounded to whole words so that it sums to its total.) The picture groups game logic with the status
+bar and menus, and the frame reset with input, view and startup. The banks part's tail is three runs by their labels:
+the vq loaders and the floor's tables (floors and ceilings), the baked menu frames and the map page (status bar and
+menus), the boot screen (startup).
+
+| control | result |
+|---|---|
+| the frame total against gamespeed's record | 14,124,839.1 a frame = `blocked65_gamespeed.log`'s `mean run-average: 14,124,839 ops/frame` |
+| the size total against the binary | 50,198,748 = the stored words of the .fjm's segment table, read by flipjump's own reader |
+| `audit_pies.py` (the widget parsed back; the checks its docstring lists) | 129 checks, 0 FAIL (`blocked65_pies_audit.log`) |
+| `audit_pies.py --selftest` (R9) | 16 of 16 mutations CAUGHT (`blocked65_pies_selftest.log`): a row value, a percent, a legend value, a description number, two aria percents, the fallback text cut short, a fallback number, the centre total, the heading's two totals, two rows out of order, a size row, two keys of one color in each mode, and sprites and collision in each other's colors |
+
+Evidence: `blocked65_pies_profx.log`, `_classify.log`, `_make.log`, `_audit.log`, `_selftest.log`,
+`blocked65_pies_classified.json` (the classifier's output), `blocked65_pies_widget.html` (the widget the audit read).
+
+Not covered:
+
+- Which category a word belongs to is the classifier's rule. The audit holds the widget to the classifier's output
+  and the two totals to their own sources; no second tool checks the rule.
+- The widget's script that paints the rows (the legend's template, the chart's data binding) is not audited, and the
+  picture, a screenshot of the widget's page, is not compared with it by a tool.
+- The palette validator does not pass outright. Its colour-blind separation is WARN for three of the four colour
+  sequences; its contrast check is WARN for three (the amber and the green on white, the grey on dark: below 3:1); its
+  chroma check FAILs on the grey of the lookup tables. The legend names every slice with its value, which is the
+  relief the validator asks for.

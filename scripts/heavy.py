@@ -24,6 +24,8 @@ LOCK = os.path.join(DOCS, "HEAVY.lock")
 QUEUE = os.path.join(DOCS, "HEAVY.queue")
 MIN_AVAIL_GB = 4.5
 POLL = 30
+UNIX_EPOCH_SINCE_1601 = 11644473600     # seconds from Windows' epoch (1601) to Unix's (1970)
+STAMP_SLACK = 2.0                       # seconds: a file's time stamp may be coarser than a process's start time
 
 
 class MEMSTAT(ctypes.Structure):
@@ -40,25 +42,49 @@ def avail_gb():
     return m.ullAvailPhys / 2 ** 30
 
 
-def pid_alive(pid):
-    h = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)      # PROCESS_QUERY_LIMITED_INFORMATION
+def process_started_at(pid):
+    """when the running process `pid` started, in Unix seconds; None when no such process runs"""
+    kernel32 = ctypes.WinDLL("kernel32")
+    kernel32.OpenProcess.restype = ctypes.c_void_p
+    h = kernel32.OpenProcess(0x1000, False, pid)                       # PROCESS_QUERY_LIMITED_INFORMATION
     if not h:
+        return None
+    h = ctypes.c_void_p(h)
+    try:
+        code = ctypes.c_ulong()
+        kernel32.GetExitCodeProcess(h, ctypes.byref(code))
+        if code.value != 259:                                          # STILL_ACTIVE
+            return None
+        created, exited, kernel, user = (ctypes.c_ulonglong() for _ in range(4))      # FILETIMEs: 100 ns ticks
+        if not kernel32.GetProcessTimes(h, ctypes.byref(created), ctypes.byref(exited), ctypes.byref(kernel),
+                                        ctypes.byref(user)):
+            return None
+        return created.value / 1e7 - UNIX_EPOCH_SINCE_1601
+    finally:
+        kernel32.CloseHandle(h)
+
+
+def writer_runs(path, pid):
+    """the process that wrote `path` (the lock or a queue entry: each carries its writer's pid) still runs. Windows
+    hands a dead process's pid to a new one, so a running `pid` that started after the file was written is another
+    process"""
+    started = process_started_at(pid)
+    try:
+        return started is not None and started <= os.path.getmtime(path) + STAMP_SLACK
+    except OSError:                                                    # the file is gone
         return False
-    code = ctypes.c_ulong()
-    ctypes.windll.kernel32.GetExitCodeProcess(h, ctypes.byref(code))
-    ctypes.windll.kernel32.CloseHandle(h)
-    return code.value == 259                                           # STILL_ACTIVE
 
 
 def clear_stale_lock():
     """a lock whose holder died (a session ended mid-job, 2026-10-20: the queue sat blocked for a day) is removed --
     the holder's pid is in the lock text; a live holder, or a lock with no pid, is left alone"""
     import re
-    m = re.search(r"\bpid (\d+)\b", lock_text())
-    if m and not pid_alive(int(m.group(1))):
+    text = lock_text()
+    m = re.search(r"\bpid (\d+)\b", text)
+    if m and not writer_runs(LOCK, int(m.group(1))) and lock_text() == text:      # still the lock that was judged
         try:
             os.remove(LOCK)
-            print("heavy.py: removed a stale lock (pid %s is gone)" % m.group(1), flush=True)
+            print("heavy.py: removed a stale lock (its holder, pid %s, is gone)" % m.group(1), flush=True)
         except OSError:
             pass
 
@@ -80,7 +106,7 @@ def higher_waiter(prio):
         try:
             p, _, rest = n.partition("_")
             pid = int(rest.rsplit("_", 1)[1])
-            if int(p) > prio and pid_alive(pid):
+            if int(p) > prio and writer_runs(os.path.join(QUEUE, n), pid):
                 return n
         except (ValueError, IndexError):
             continue

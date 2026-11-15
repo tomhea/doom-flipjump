@@ -24,8 +24,8 @@ LOCK = os.path.join(DOCS, "HEAVY.lock")
 QUEUE = os.path.join(DOCS, "HEAVY.queue")
 MIN_AVAIL_GB = 4.5
 POLL = 30
-EPOCH_1601 = 11644473600      # seconds from Windows' epoch (1601) to Unix's (1970)
-STAMP_SLACK = 2.0             # seconds: a file's time stamp may be coarser than a process's start time
+UNIX_EPOCH_SINCE_1601 = 11644473600     # seconds from Windows' epoch (1601) to Unix's (1970)
+STAMP_SLACK = 2.0                       # seconds: a file's time stamp may be coarser than a process's start time
 
 
 class MEMSTAT(ctypes.Structure):
@@ -42,7 +42,7 @@ def avail_gb():
     return m.ullAvailPhys / 2 ** 30
 
 
-def process_start(pid):
+def process_started_at(pid):
     """when the running process `pid` started, in Unix seconds; None when no such process runs"""
     kernel32 = ctypes.WinDLL("kernel32")
     kernel32.OpenProcess.restype = ctypes.c_void_p
@@ -59,7 +59,7 @@ def process_start(pid):
         if not kernel32.GetProcessTimes(h, ctypes.byref(created), ctypes.byref(exited), ctypes.byref(kernel),
                                         ctypes.byref(user)):
             return None
-        return created.value / 1e7 - EPOCH_1601
+        return created.value / 1e7 - UNIX_EPOCH_SINCE_1601
     finally:
         kernel32.CloseHandle(h)
 
@@ -68,7 +68,7 @@ def writer_runs(path, pid):
     """the process that wrote `path` (the lock or a queue entry: each carries its writer's pid) still runs. Windows
     hands a dead process's pid to a new one, so a running `pid` that started after the file was written is another
     process"""
-    started = process_start(pid)
+    started = process_started_at(pid)
     try:
         return started is not None and started <= os.path.getmtime(path) + STAMP_SLACK
     except OSError:                                                    # the file is gone
@@ -79,8 +79,9 @@ def clear_stale_lock():
     """a lock whose holder died (a session ended mid-job, 2026-10-20: the queue sat blocked for a day) is removed --
     the holder's pid is in the lock text; a live holder, or a lock with no pid, is left alone"""
     import re
-    m = re.search(r"\bpid (\d+)\b", lock_text())
-    if m and not writer_runs(LOCK, int(m.group(1))):
+    text = lock_text()
+    m = re.search(r"\bpid (\d+)\b", text)
+    if m and not writer_runs(LOCK, int(m.group(1))) and lock_text() == text:      # still the lock that was judged
         try:
             os.remove(LOCK)
             print("heavy.py: removed a stale lock (its holder, pid %s, is gone)" % m.group(1), flush=True)

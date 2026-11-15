@@ -13,6 +13,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 BEFORE_THIS_PROCESS = time.time() - 14 * 86400
+SLEEP = [sys.executable, "-c", "import time; time.sleep(60)"]
 
 pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="heavy.py asks Windows about its processes")
 
@@ -90,3 +91,70 @@ def test_a_lock_that_names_no_pid_stays(heavy):
     lock(heavy, "held by hand\n", written_at=BEFORE_THIS_PROCESS)
     heavy.clear_stale_lock()
     assert os.path.exists(heavy.LOCK)
+
+
+def test_a_lock_taken_by_another_job_while_the_old_one_was_judged_stays(heavy, ended, monkeypatch):
+    lock(heavy, "old prio 5 pid %d since then: python job.py\n" % ended.pid)
+    new_lock = "new prio 5 pid %d since now: python job.py\n" % os.getpid()
+
+    def old_holder_is_gone_and_a_new_job_takes_the_lock(path, pid):
+        lock(heavy, new_lock)
+        return False
+
+    monkeypatch.setattr(heavy, "writer_runs", old_holder_is_gone_and_a_new_job_takes_the_lock)
+    heavy.clear_stale_lock()
+    assert Path(heavy.LOCK).read_text() == new_lock
+
+
+def stop(process):
+    process.kill()
+    process.wait()
+
+
+@pytest.fixture
+def sleeper():
+    process = subprocess.Popen(SLEEP)
+    yield process
+    stop(process)
+
+
+def test_a_process_start_time_is_when_it_was_started(heavy):
+    before = time.time()
+    child = subprocess.Popen(SLEEP)
+    after = time.time()
+    try:
+        started = heavy.process_started_at(child.pid)
+    finally:
+        stop(child)
+    assert before - 1 <= started <= after + 1
+
+
+def test_an_entry_written_ten_seconds_before_its_pid_started_is_not_a_waiter(heavy, sleeper):
+    queue_entry(heavy, 7, sleeper.pid, written_at=time.time() - 10)
+    assert heavy.higher_waiter(5) is None
+
+
+def test_an_entry_that_is_gone_has_no_running_writer(heavy, tmp_path):
+    assert not heavy.writer_runs(str(tmp_path / "absent"), os.getpid())
+
+
+def test_a_pid_that_no_process_has_did_not_start(heavy):
+    assert heavy.process_started_at(0xFFFFFFF0) is None
+
+
+def test_the_job_runs_under_a_lock_that_reads_as_held(heavy, monkeypatch):
+    seen = {}
+
+    def job(cmd, log):
+        seen["held"] = heavy.writer_runs(heavy.LOCK, os.getpid())
+        heavy.clear_stale_lock()
+        seen["kept"] = os.path.exists(heavy.LOCK)
+        seen["queued"] = os.listdir(heavy.QUEUE)
+        return 7
+
+    monkeypatch.setattr(heavy, "run", job)
+    monkeypatch.setattr(heavy, "avail_gb", lambda: 99.0)
+    monkeypatch.setattr(sys, "argv", ["heavy.py", "job", "--", "python", "job.py"])
+    assert heavy.main() == 7
+    assert seen == {"held": True, "kept": True, "queued": []}
+    assert not os.path.exists(heavy.LOCK)
